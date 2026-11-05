@@ -12,10 +12,11 @@
 - **Pi adapter:** a Pi extension in plain JavaScript (`tool_call` and `tool_result` events, `/auto-mode` command), loaded by Pi without a build step
 - **Codex CLI adapter:** command hooks in plain JavaScript (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest` and `PostToolUse`), one Node.js process per event, registered in `~/.codex/hooks.json` by an install script
 - **Tests:** `node:test` (unit), a scripted run against a real daemon (end-to-end)
-- **CI / releases:** GitHub Actions
+- **CI / releases:** GitHub Actions; pushes to `dev` run the tests, and only merges to `main` publish a release
 
 ## Project Rules
 
+- Work happens on `dev`. Open pull requests against `dev`; `main` only receives merges. Do not push directly to `main`.
 - Every file in the repository is written in English: code, identifiers, user-facing strings, documentation and commit messages. The only exception is attack samples in other languages inside `bench/payloads.mjs`, which exist to test multilingual detection.
 - Commit messages follow Conventional Commits: `type(scope): description`, with types such as `feat`, `fix`, `chore`, `docs`, `refactor`, `test` and `ci`. Mark breaking changes with `!` after the type. Keep the subject line short and make it the best single description of the change; put the details in the commit body, written out in full.
 - Commits, pull requests and anything else published to the repository carry only the repository owner's name and email. Never add AI or tool attribution: no `Co-Authored-By` trailers, no "Generated with" lines, no assistant names as author or committer.
