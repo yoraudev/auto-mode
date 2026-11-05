@@ -257,7 +257,7 @@ npm run docs:policy
 
 `npm run test:e2e` starts its own daemon and downloads the classifier on first use. The benchmark (`npm run bench`) does not run from a fresh clone: its documents are not in the repository and it expects the model files under `models/`. [docs/benchmark.md](docs/benchmark.md) describes what it needs.
 
-Risk rules are in `daemon/risk.mjs` and the decision table is in `daemon/policy.mjs`. How the pieces fit together is described in [docs/architecture.md](docs/architecture.md), and how the classifier was chosen in [docs/benchmark.md](docs/benchmark.md). Development happens on `dev`, and `main` only receives merges. A push to `main` that changes `daemon/`, `adapters/`, `package.json` or `package-lock.json` publishes a new release; pushes to `dev` and other pushes to `main` run the tests without one.
+Risk rules are in `daemon/risk.mjs` and the decision table is in `daemon/policy.mjs`. How the pieces fit together is described in [docs/architecture.md](docs/architecture.md), and how the classifier was chosen in [docs/benchmark.md](docs/benchmark.md). Work is committed to the `dev` branch. `main` is protected and only changes through pull requests from `dev`; a merge into `main` that changes `daemon/`, `adapters/`, `package.json` or `package-lock.json` publishes a new release.
 
 ## License
 
