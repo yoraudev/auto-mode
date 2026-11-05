@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 
-const DIR = join(homedir(), ".cache", "universal-auto-mode", "codex")
+const DIR = join(homedir(), ".cache", "auto-mode", "codex")
 const empty = () => ({ pending: {}, granted: [], reviews: [], down: false })
 
 export function createStore(dir = DIR) {

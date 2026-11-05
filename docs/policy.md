@@ -33,7 +33,7 @@ Rules are checked in the order below; the first match decides. Every pattern is 
 | publishes to a registry | `\b(npm\|pnpm\|yarn\|bun\|cargo)\s+publish\b\|\btwine\s+upload\b\|\bgh\s+release\b\|\bdocker\s+push\b` |
 | changes privileges or persistence | `\b(sudo\|doas\|runas)\b\|\bchmod\s+\S*[+]s\|\b(crontab\|schtasks\|launchctl\|systemctl)\b\|\breg(\.exe)?\s+add\b\|\bsetx\b` |
 | modifies git hooks, shell startup files or global config | `\bgit\s+config\s+.*(--global\|--system)\|core\.hookspath\|(^\|[\\/\s"'=])(\.(bash\|zsh)rc\|\.(bash_\|z)?profile\|\.zshenv\|\.bash_login\|\.gitconfig\|authorized_keys\|[\w.]*profile\.ps1)(?=$\|[\\/\s"';\|&)])\|\$profile\b\|[\\/]\.git[\\/]hooks\|(^\|[\\/\s"'=])\.husky[\\/]\|start menu[\\/]programs[\\/]startup\|[\\/]launch(agents\|daemons)[\\/]\|\.config[\\/](autostart\|systemd)[\\/]\|[\\/]etc[\\/]cron` |
-| targets the auto-mode daemon itself | `universal-auto-mode\|\buam\b\|:7717\b` |
+| targets the auto-mode daemon itself | `auto[-_]mode\|:7717\b` |
 
 A wildcard that could expand to a credential file is critical as well. A path segment with `*`, `?`, `[]` or `{}` and at least two other characters is matched against `.ssh`, `.aws`, `.azure`, `.gnupg`, `.kube`, `.env`, `.env.local`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `id_rsa`, `id_ed25519`, `id_ecdsa`, `credentials`, `secrets`, `x.pem`, `x.key`, `x.pfx`, `x.p12`.
 

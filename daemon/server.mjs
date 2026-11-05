@@ -16,7 +16,7 @@ const IDLE_CHECK_MS = 5000;
 
 const log = (...args) => {
   const line = `${new Date().toISOString()} ${args.join(' ')}\n`;
-  if (process.env.UAM_LOG) appendFileSync(process.env.UAM_LOG, line);
+  if (process.env.AUTO_MODE_LOG) appendFileSync(process.env.AUTO_MODE_LOG, line);
   else process.stderr.write(line);
 };
 process.on('uncaughtException', (error) => {

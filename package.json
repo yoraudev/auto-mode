@@ -1,5 +1,5 @@
 {
-  "name": "universal-auto-mode",
+  "name": "auto-mode",
   "version": "0.1.0",
   "private": true,
   "description": "Prompt-injection-aware auto-approval for AI coding agents",

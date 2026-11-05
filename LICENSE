@@ -1,7 +1,7 @@
-Universal Auto Mode License
+Auto Mode License
 
 Copyright (c) 2026 yoraudev
-Original project: https://github.com/yoraudev/universal-auto-mode
+Original project: https://github.com/yoraudev/auto-mode
 
 Permission is granted, free of charge, to any person obtaining a copy of this
 software and its documentation (the "Software"), to use, copy, modify and
@@ -22,9 +22,9 @@ subject to the following conditions:
    example in another repository, a package registry, or as part of another
    product), you must:
    a. state prominently, in the README or the equivalent first-seen
-      description, that it is based on Universal Auto Mode by yoraudev,
+      description, that it is based on Auto Mode by yoraudev,
       with a link to the original project; and
-   b. not publish it under the name "Universal Auto Mode" or a name
+   b. not publish it under the name "Auto Mode" or a name
       likely to be confused with it, unless it is an unmodified copy.
 
 4. Modified versions. Modified versions must be plainly marked as modified and

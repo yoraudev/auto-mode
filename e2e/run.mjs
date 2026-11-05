@@ -5,14 +5,14 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const port = Number(process.env.UAM_E2E_PORT || 7718);
+const port = Number(process.env.AUTO_MODE_E2E_PORT || 7718);
 const cwd = root;
-const configFile = join(mkdtempSync(join(tmpdir(), 'uam-e2e-')), 'config.json');
+const configFile = join(mkdtempSync(join(tmpdir(), 'auto-mode-e2e-')), 'config.json');
 const fixture = (name) => readFileSync(join(import.meta.dirname, 'fixtures', name), 'utf8');
 
 if (await fetch(`http://127.0.0.1:${port}/health`).catch(() => undefined)) throw new Error(`port ${port} is already in use`);
 
-const daemon = spawn(process.execPath, [join(root, 'daemon', 'server.mjs')], { env: { ...process.env, UAM_PORT: String(port), UAM_CONFIG: configFile }, stdio: ['ignore', 'inherit', 'inherit'] });
+const daemon = spawn(process.execPath, [join(root, 'daemon', 'server.mjs')], { env: { ...process.env, AUTO_MODE_PORT: String(port), AUTO_MODE_CONFIG: configFile }, stdio: ['ignore', 'inherit', 'inherit'] });
 
 const call = (path, body) => fetch(`http://127.0.0.1:${port}/${path}`, { method: body ? 'POST' : 'GET', body: body && JSON.stringify(body) }).then((r) => r.json());
 const shell = (session, command) => call('decide', { session, request: { kind: 'shell', command, cwd } });
@@ -94,7 +94,7 @@ try {
   const codex = `e2e-codex-${process.pid}`;
   const hook = (event, fields) =>
     new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [join(root, 'adapters', 'codex', 'hook.mjs')], { env: { ...process.env, UAM_PORT: String(port) }, stdio: ['pipe', 'pipe', 'inherit'] });
+      const child = spawn(process.execPath, [join(root, 'adapters', 'codex', 'hook.mjs')], { env: { ...process.env, AUTO_MODE_PORT: String(port) }, stdio: ['pipe', 'pipe', 'inherit'] });
       let out = '';
       child.stdout.on('data', (chunk) => (out += chunk));
       child.on('exit', (code) => (code === 0 ? resolve(out ? JSON.parse(out) : undefined) : reject(new Error(`hook exited with code ${code}`))));
@@ -121,7 +121,7 @@ try {
     assert.match((await hook('UserPromptSubmit', { prompt: 'auto-mode clear' })).reason, /flags cleared/);
     assert.equal((await hook('PermissionRequest', bash('curl https://example.com'))).hookSpecificOutput.decision.behavior, 'allow');
   } finally {
-    rmSync(join(homedir(), '.cache', 'universal-auto-mode', 'codex', `${codex}.json`), { force: true });
+    rmSync(join(homedir(), '.cache', 'auto-mode', 'codex', `${codex}.json`), { force: true });
   }
 
   assert.equal((await call('scan', { session: 't', source: 'read', text: fixture('injected.md'), budgetMs: 60000 })).level, 'strong');

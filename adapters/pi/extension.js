@@ -4,7 +4,7 @@ import { describe, toRequest } from "./request.js"
 import { openSettings, statusText } from "./settings.js"
 
 const SKIP_SCAN = new Set(["edit", "write"])
-const STATUS_KEY = "universal-auto-mode"
+const STATUS_KEY = "auto-mode"
 const CONTINUE = "Continue and warn the agent"
 const STOP = "Stop the agent"
 const ALLOW = "Allow"
@@ -21,7 +21,7 @@ function styled(theme, config, progress) {
 }
 
 export function createExtension({ call, callOrStart, start, scan: scanOutput, decide }) {
-  return function universalAutoMode(pi) {
+  return function autoMode(pi) {
     const answers = new Map()
     let asking = Promise.resolve()
     let down = false
@@ -60,7 +60,7 @@ export function createExtension({ call, callOrStart, start, scan: scanOutput, de
     pi.on("tool_call", async (event, ctx) => {
       const decision = await decide(sessionOf(ctx), toRequest(event, ctx.cwd))
       if (!decision || decision.disabled || decision.effect !== "ask") return
-      const why = `universal-auto-mode: ${decision.reason}`
+      const why = `auto-mode: ${decision.reason}`
       if (!ctx.hasUI) return { block: true, reason: `This call needs confirmation and nobody is present to give it (${why}).` }
       const choice = await ctx.ui.select(`Auto mode asks before this ${event.toolName} call: ${decision.reason}.\n\n${describe(event)}`, [ALLOW, BLOCK])
       if (choice !== ALLOW) return { block: true, reason: `The user did not allow this call (${why}).` }
@@ -92,7 +92,7 @@ export function createExtension({ call, callOrStart, start, scan: scanOutput, de
     })
 
     pi.registerCommand("auto-mode", {
-      description: "Universal auto mode settings",
+      description: "Auto mode settings",
       handler: async (_args, ctx) => {
         await openSettings({ ui: ctx.ui, call, start, session: sessionOf(ctx), onChange: (config, progress) => showStatus(ctx, config, progress) })
       },

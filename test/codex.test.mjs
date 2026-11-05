@@ -23,7 +23,7 @@ function harness(replies = {}) {
     return typeof reply === 'function' ? reply(body) : reply;
   };
   const client = { call, callOrStart: call, scan: (body) => call('scan', body), decide: (session, request) => call('decide', { session, request }) };
-  const store = createStore(mkdtempSync(join(tmpdir(), 'uam-codex-')));
+  const store = createStore(mkdtempSync(join(tmpdir(), 'auto-mode-codex-')));
   return { calls, store, replies, handlers: createHandlers({ client, store }) };
 }
 
@@ -203,12 +203,12 @@ test('the session start hook starts the daemon and reports a classifier that is 
 test('the installer adds its hooks next to existing ones and removes only its own', () => {
   const other = { hooks: [{ type: 'command', command: 'node "/home/u/mine.mjs"' }] };
   const existing = { hooks: { PreToolUse: [other], Stop: [other] }, extra: true };
-  const installed = merge(existing, { path: '/opt/universal-auto-mode/adapters/codex/hook.mjs' });
+  const installed = merge(existing, { path: '/opt/auto-mode/adapters/codex/hook.mjs' });
   assert.equal(installed.extra, true);
   assert.deepEqual(Object.keys(installed.hooks).sort(), [...EVENTS, 'Stop'].sort());
   assert.equal(installed.hooks.PreToolUse.length, 2);
-  assert.equal(installed.hooks.PreToolUse[1].hooks[0].command, 'node "/opt/universal-auto-mode/adapters/codex/hook.mjs"');
-  assert.deepEqual(merge(installed, { path: '/opt/universal-auto-mode/adapters/codex/hook.mjs' }), installed);
+  assert.equal(installed.hooks.PreToolUse[1].hooks[0].command, 'node "/opt/auto-mode/adapters/codex/hook.mjs"');
+  assert.deepEqual(merge(installed, { path: '/opt/auto-mode/adapters/codex/hook.mjs' }), installed);
   assert.deepEqual(merge(installed, { remove: true }), existing);
   assert.deepEqual(merge(undefined, { remove: true }), { hooks: {} });
 });
@@ -221,7 +221,7 @@ test('the hook script reads an event from stdin and prints the answer', async ()
   });
   await new Promise((resolve) => daemon.listen(0, '127.0.0.1', resolve));
   try {
-    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'adapters', 'codex', 'hook.mjs')], { env: { ...process.env, UAM_PORT: String(daemon.address().port) }, stdio: ['pipe', 'pipe', 'inherit'] });
+    const child = spawn(process.execPath, [join(import.meta.dirname, '..', 'adapters', 'codex', 'hook.mjs')], { env: { ...process.env, AUTO_MODE_PORT: String(daemon.address().port) }, stdio: ['pipe', 'pipe', 'inherit'] });
     let out = '';
     child.stdout.on('data', (chunk) => (out += chunk));
     child.stdin.end(JSON.stringify({ hook_event_name: 'PermissionRequest', ...bash('npm test') }));

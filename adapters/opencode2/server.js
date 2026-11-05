@@ -25,7 +25,7 @@ function withWarning(result, score) {
 }
 
 export default Plugin.define({
-  id: "universal-auto-mode",
+  id: "auto-mode",
   async setup(ctx) {
     const cwd = ctx.location.directory
     const debug = Boolean(ctx.options.debug)
@@ -50,7 +50,7 @@ export default Plugin.define({
         await ctx.storage.set(trustKey, [...trusted])
       }
     }
-    follow().catch((error) => console.error("[universal-auto-mode] event stream ended:", error.message))
+    follow().catch((error) => console.error("[auto-mode] event stream ended:", error.message))
 
     await ctx.session.hook("prompt", (prompt) => callOrStart("turn", { session: prompt.sessionID }).then(() => undefined))
 
@@ -70,11 +70,11 @@ export default Plugin.define({
         return
       }
       event.result = withheld(event.result, scan.score)
-      await ctx.session.interrupt({ sessionID: event.sessionID }).catch((error) => console.error("[universal-auto-mode] could not interrupt the session:", error.message))
+      await ctx.session.interrupt({ sessionID: event.sessionID }).catch((error) => console.error("[auto-mode] could not interrupt the session:", error.message))
     })
 
     await ctx.permission.hook("evaluate", async (evaluation) => {
-      if (debug) console.error("[universal-auto-mode] evaluate", JSON.stringify(evaluation))
+      if (debug) console.error("[auto-mode] evaluate", JSON.stringify(evaluation))
       if (evaluation.effect === "deny") return
       const request = toRequest(evaluation, cwd)
       if (request.kind === "other" && trusted.has(evaluation.action)) return

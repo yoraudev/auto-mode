@@ -1,4 +1,4 @@
-# Universal Auto Mode
+# Auto Mode
 
 An auto mode for any AI coding agent and any model. A local classifier scans what the agent reads for prompt injection, and a set of risk rules decides which actions run without asking and which go back to you.
 
@@ -54,7 +54,7 @@ Add the adapter to `opencode.jsonc`, globally or in a project:
 
 ```jsonc
 {
-  "plugins": ["/full/path/to/universal-auto-mode/adapters/opencode2"]
+  "plugins": ["/full/path/to/auto-mode/adapters/opencode2"]
 }
 ```
 
@@ -65,17 +65,17 @@ Run `/auto-mode` to watch the classifier download; it opens a progress view with
 Install the extension for your user, or add `-l` to install it for one project:
 
 ```bash
-pi install /full/path/to/universal-auto-mode/adapters/pi/index.js
+pi install /full/path/to/auto-mode/adapters/pi/index.js
 ```
 
-To try it for one run without installing, start Pi with `pi -e /full/path/to/universal-auto-mode/adapters/pi/index.js`. The footer shows whether auto mode is on and in which mode, and `/auto-mode` opens the settings.
+To try it for one run without installing, start Pi with `pi -e /full/path/to/auto-mode/adapters/pi/index.js`. The footer shows whether auto mode is on and in which mode, and `/auto-mode` opens the settings.
 
 ### Codex CLI
 
 The adapter is a set of [hooks](https://developers.openai.com/codex/hooks). Add them to `~/.codex/hooks.json`:
 
 ```bash
-node /full/path/to/universal-auto-mode/adapters/codex/install.mjs
+node /full/path/to/auto-mode/adapters/codex/install.mjs
 ```
 
 Then open Codex, run `/hooks` and trust them; Codex does not run a hook you have not reviewed, and says nothing when it skips one. The script keeps hooks you already have, can be run again after moving the project, and removes its entries with `--remove`.
@@ -153,7 +153,7 @@ The same menu shows the current session's score, clears its flags, and trusts or
 
 ### Config file
 
-The daemon stores these settings in `~/.config/universal-auto-mode/config.json`, which can also be edited by hand while the daemon is stopped. Every key is optional. A value the daemon cannot use is ignored with a line in its log, and the default applies; the same goes for a file that is not valid JSON. Content you marked as trusted is kept as a list of checksums in `trusted.json` in the same directory, 1,000 entries at most.
+The daemon stores these settings in `~/.config/auto-mode/config.json`, which can also be edited by hand while the daemon is stopped. Every key is optional. A value the daemon cannot use is ignored with a line in its log, and the default applies; the same goes for a file that is not valid JSON. Content you marked as trusted is kept as a list of checksums in `trusted.json` in the same directory, 1,000 entries at most.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -164,7 +164,7 @@ The daemon stores these settings in `~/.config/universal-auto-mode/config.json`,
 | `model` | `"base"` | `"base"` (308M parameters, more accurate) or `"small"` (141M, about twice as fast) |
 | `device` | `"cpu"` | Where the classifier runs: `"cpu"`, `"gpu"`, or one provider by name (`"dml"`, `"webgpu"`, `"cuda"`, `"coreml"`) |
 | `port` | `7717` | Port on `127.0.0.1` |
-| `modelsDir` | `~/.cache/universal-auto-mode/models` | Where classifier files are stored |
+| `modelsDir` | `~/.cache/auto-mode/models` | Where classifier files are stored |
 | `strong` | `0.9` | Session score from which `medium` actions are sent to you |
 | `weak` | `0.3` | Session score from which `high` actions are sent to you |
 | `window` | `512` | Tokens per classifier window |
@@ -174,17 +174,17 @@ The daemon stores these settings in `~/.config/universal-auto-mode/config.json`,
 | `maxChars` | `200000` | Longest tool output scanned in full |
 | `unloadMinutes` | `30` | Minutes without a scan before the classifier is unloaded; `0` for never |
 
-`port` and `modelsDir` can only be set in the file. The environment variables `UAM_MODEL`, `UAM_DEVICE`, `UAM_PORT` and `UAM_MODELS_DIR` override the file when the daemon starts, and `UAM_CONFIG` points it at a different file. With `UAM_LOG` set to a file, the daemon appends its log there instead of writing it to its error output.
+`port` and `modelsDir` can only be set in the file. The environment variables `AUTO_MODE_MODEL`, `AUTO_MODE_DEVICE`, `AUTO_MODE_PORT` and `AUTO_MODE_MODELS_DIR` override the file when the daemon starts, and `AUTO_MODE_CONFIG` points it at a different file. With `AUTO_MODE_LOG` set to a file, the daemon appends its log there instead of writing it to its error output.
 
 The OpenCode 2 adapter takes `port`, `modelsDir`, `node` (path to the Node.js binary) and `debug` as options. To set them, write the plugin entry as an object instead of a path:
 
 ```jsonc
 {
-  "plugins": [{ "package": "/full/path/to/universal-auto-mode/adapters/opencode2", "options": { "port": 7717 } }]
+  "plugins": [{ "package": "/full/path/to/auto-mode/adapters/opencode2", "options": { "port": 7717 } }]
 }
 ```
 
-`modelsDir` applies only when the adapter starts the daemon itself. The Pi and Codex adapters read the port from `UAM_PORT`.
+`modelsDir` applies only when the adapter starts the daemon itself. The Pi and Codex adapters read the port from `AUTO_MODE_PORT`.
 
 ### GPU
 
@@ -242,7 +242,7 @@ What this showed:
 - A scan takes about 1.5 seconds per 1,400 tokens with `base` on a six-core desktop CPU, and about half that on a Radeon RX 580 once the GPU has seen that input length. The tool result is held back until its scan is done, so a long page read through a browser tool can add many seconds to that step. A flagged output takes about a second longer with `base` on that CPU, because the daemon then looks for the passage to quote. A scan that outlasts the scan budget finishes in the background; in `ask` mode you are still asked if it is flagged, with a note that the model already has the output.
 - Tool output read while auto mode is off is never scanned. If you turn it on in the middle of a session, what the model read before that does not count toward the session score.
 - Until the classifier has been downloaded and loaded, tool output cannot be scanned and nothing is flagged or asked, unless **Unscanned output** is set to `ask`.
-- The daemon keeps running after the harness exits. After 30 minutes without a scan it unloads the classifier to free memory and loads it again for the next scan; session scores are kept. If the daemon has stopped, the adapter starts it again on the next tool call or when you open `/auto-mode`, and that call waits up to 20 seconds for it, so the output that woke it is scanned too. If it does not come up, a notice tells you that tool output is not being scanned, and the adapter tries again a minute later without holding up the calls in between. Its output goes to `~/.cache/universal-auto-mode/daemon.log` when an adapter started it; a log over 5 MB is moved to `daemon.log.1` at the next start. The log names the reason for each decision but not the command.
+- The daemon keeps running after the harness exits. After 30 minutes without a scan it unloads the classifier to free memory and loads it again for the next scan; session scores are kept. If the daemon has stopped, the adapter starts it again on the next tool call or when you open `/auto-mode`, and that call waits up to 20 seconds for it, so the output that woke it is scanned too. If it does not come up, a notice tells you that tool output is not being scanned, and the adapter tries again a minute later without holding up the calls in between. Its output goes to `~/.cache/auto-mode/daemon.log` when an adapter started it; a log over 5 MB is moved to `daemon.log.1` at the next start. The log names the reason for each decision but not the command.
 - Session scores live in memory and are lost when the daemon restarts. The daemon keeps the 500 most recently used sessions.
 - Outputs shorter than 20 characters are not scanned. One-line outputs are scanned, and in a small trial they were flagged by mistake more often than longer text: `base` gave 0.37 to an `npm warn deprecated` line and `small` gave 0.79 to an `ENOENT` error message.
 - A request to the daemon may be 64 MB at most. A tool output larger than that is not scanned.

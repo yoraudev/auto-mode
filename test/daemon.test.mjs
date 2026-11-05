@@ -10,11 +10,11 @@ import { DEFAULTS, loadConfig, loadTrusted, saveConfig, saveTrusted, trustPath }
 import { MODELS, download } from '../daemon/models.mjs';
 import { decide } from '../daemon/policy.mjs';
 
-const scratch = () => mkdtempSync(join(tmpdir(), 'uam-test-'));
+const scratch = () => mkdtempSync(join(tmpdir(), 'auto-mode-test-'));
 const envWith = (content) => {
   const file = join(scratch(), 'config.json');
   if (content !== undefined) writeFileSync(file, content);
-  return { UAM_CONFIG: file };
+  return { AUTO_MODE_CONFIG: file };
 };
 
 test('a config file with bad values keeps the good ones and falls back for the rest', () => {
@@ -42,13 +42,13 @@ test('a config file that is not JSON is ignored and can be saved over', () => {
   assert.deepEqual(loadConfig(env, (line) => warnings.push(line)), DEFAULTS);
   assert.match(warnings[0], /not valid JSON/);
   saveConfig({ model: 'small' }, env);
-  assert.deepEqual(JSON.parse(readFileSync(env.UAM_CONFIG, 'utf8')), { model: 'small' });
-  assert.equal(existsSync(`${env.UAM_CONFIG}.tmp`), false);
+  assert.deepEqual(JSON.parse(readFileSync(env.AUTO_MODE_CONFIG, 'utf8')), { model: 'small' });
+  assert.equal(existsSync(`${env.AUTO_MODE_CONFIG}.tmp`), false);
 });
 
 test('a port from the environment is used only when it is a port', () => {
-  assert.equal(loadConfig({ ...envWith(), UAM_PORT: '7800' }).port, 7800);
-  assert.equal(loadConfig({ ...envWith(), UAM_PORT: 'abc' }).port, DEFAULTS.port);
+  assert.equal(loadConfig({ ...envWith(), AUTO_MODE_PORT: '7800' }).port, 7800);
+  assert.equal(loadConfig({ ...envWith(), AUTO_MODE_PORT: 'abc' }).port, DEFAULTS.port);
 });
 
 test('trusted content is stored next to the config file', () => {
@@ -169,8 +169,8 @@ test('after a start that did not work, later calls do not wait again', async () 
 });
 
 test('the command that starts the daemon outside the caller carries only the auto mode settings', () => {
-  const line = breakawayLine({ PATH: 'C:\\bin', UAM_PORT: '7717', UAM_LOG: 'C:\\Users\\u\\.cache\\universal-auto-mode\\daemon.log', UAM_LAUNCH: 'x', UAM_MODEL: undefined }, 'C:\\Program Files\\nodejs\\node.exe', 'E:\\uam\\daemon\\server.mjs');
-  assert.equal(line, 'cmd.exe /d /s /c "set "UAM_PORT=7717"&& set "UAM_LOG=C:\\Users\\u\\.cache\\universal-auto-mode\\daemon.log"&& "C:\\Program Files\\nodejs\\node.exe" "E:\\uam\\daemon\\server.mjs""');
+  const line = breakawayLine({ PATH: 'C:\\bin', AUTO_MODE_PORT: '7717', AUTO_MODE_LOG: 'C:\\Users\\u\\.cache\\auto-mode\\daemon.log', AUTO_MODE_LAUNCH: 'x', AUTO_MODE_MODEL: undefined }, 'C:\\Program Files\\nodejs\\node.exe', 'E:\\auto-mode\\daemon\\server.mjs');
+  assert.equal(line, 'cmd.exe /d /s /c "set "AUTO_MODE_PORT=7717"&& set "AUTO_MODE_LOG=C:\\Users\\u\\.cache\\auto-mode\\daemon.log"&& "C:\\Program Files\\nodejs\\node.exe" "E:\\auto-mode\\daemon\\server.mjs""');
 });
 
 test('a log file is set aside once it has grown past the limit', () => {

@@ -1,4 +1,4 @@
-# Universal Auto Mode
+# Auto Mode
 
 ## Tech Stack
 

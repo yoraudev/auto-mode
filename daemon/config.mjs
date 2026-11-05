@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-export const configPath = (env = process.env) => env.UAM_CONFIG || join(homedir(), '.config', 'universal-auto-mode', 'config.json');
+export const configPath = (env = process.env) => env.AUTO_MODE_CONFIG || join(homedir(), '.config', 'auto-mode', 'config.json');
 export const trustPath = (env = process.env) => join(dirname(configPath(env)), 'trusted.json');
 
 export const DEFAULTS = {
@@ -13,7 +13,7 @@ export const DEFAULTS = {
   unscanned: 'allow',
   model: 'base',
   device: 'cpu',
-  modelsDir: join(homedir(), '.cache', 'universal-auto-mode', 'models'),
+  modelsDir: join(homedir(), '.cache', 'auto-mode', 'models'),
   window: 512,
   overlap: 64,
   strong: 0.9,
@@ -103,11 +103,11 @@ export function loadConfig(env = process.env, warn = () => {}) {
     warn(`${configPath(env)}: ${problem}; using the defaults for both`);
     for (const pair of PAIRS) if (problem.includes(`"${pair[0]}"`)) for (const key of pair) config[key] = DEFAULTS[key];
   }
-  if (env.UAM_MODEL) config.model = env.UAM_MODEL;
-  if (env.UAM_DEVICE) config.device = env.UAM_DEVICE;
-  if (env.UAM_PORT && problemWith('port', Number(env.UAM_PORT), FILE_ONLY.port)) warn(`UAM_PORT is not a port number; using ${config.port}`);
-  else if (env.UAM_PORT) config.port = Number(env.UAM_PORT);
-  if (env.UAM_MODELS_DIR) config.modelsDir = env.UAM_MODELS_DIR;
+  if (env.AUTO_MODE_MODEL) config.model = env.AUTO_MODE_MODEL;
+  if (env.AUTO_MODE_DEVICE) config.device = env.AUTO_MODE_DEVICE;
+  if (env.AUTO_MODE_PORT && problemWith('port', Number(env.AUTO_MODE_PORT), FILE_ONLY.port)) warn(`AUTO_MODE_PORT is not a port number; using ${config.port}`);
+  else if (env.AUTO_MODE_PORT) config.port = Number(env.AUTO_MODE_PORT);
+  if (env.AUTO_MODE_MODELS_DIR) config.modelsDir = env.AUTO_MODE_MODELS_DIR;
   return config;
 }
 

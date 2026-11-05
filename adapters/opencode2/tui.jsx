@@ -10,7 +10,7 @@ const REASON_TOAST_MS = 20000
 const REVIEW_POLL_MS = 1000
 
 export default Plugin.define({
-  id: "universal-auto-mode",
+  id: "auto-mode",
   setup(ctx) {
     const { call, start } = createClient(ctx.options)
 
@@ -59,7 +59,7 @@ export default Plugin.define({
       mode: "global",
       commands: [
         {
-          id: "universal-auto-mode.settings",
+          id: "auto-mode.settings",
           title: "Auto mode settings",
           description: "Change the classifier, device and thresholds, or clear this session's flags",
           group: "Auto mode",

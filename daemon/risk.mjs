@@ -9,7 +9,7 @@ export const CREDENTIAL_NAMES = ['.ssh', '.aws', '.azure', '.gnupg', '.kube', '.
 
 const STARTUP = new RegExp(`${BEFORE}(\\.(bash|zsh)rc|\\.(bash_|z)?profile|\\.zshenv|\\.bash_login|\\.gitconfig|authorized_keys|[\\w.]*profile\\.ps1)${AFTER}|\\$profile\\b|[\\\\/]\\.git[\\\\/]hooks|${BEFORE}\\.husky[\\\\/]|start menu[\\\\/]programs[\\\\/]startup|[\\\\/]launch(agents|daemons)[\\\\/]|\\.config[\\\\/](autostart|systemd)[\\\\/]|[\\\\/]etc[\\\\/]cron`, 'i');
 const HARNESS = new RegExp(`${BEFORE}(opencode\\.jsonc?${AFTER}|\\.opencode[\\\\/]|\\.pi[\\\\/]|\\.config[\\\\/]opencode[\\\\/])`, 'i');
-const OWN_DATA = /[\\/]\.(config|cache)[\\/]universal-auto-mode([\\/]|$)/i;
+const OWN_DATA = /[\\/]\.(config|cache)[\\/]auto-mode([\\/]|$)/i;
 const OWN_ROOT = resolve(import.meta.dirname, '..');
 
 const INTERPRETER = String.raw`((ba|z|da|k)?sh|python\d?|node|perl|ruby|pwsh|powershell)`;
@@ -26,7 +26,7 @@ export const CRITICAL = [
   [/\b(npm|pnpm|yarn|bun|cargo)\s+publish\b|\btwine\s+upload\b|\bgh\s+release\b|\bdocker\s+push\b/i, 'publishes to a registry'],
   [/\b(sudo|doas|runas)\b|\bchmod\s+\S*[+]s|\b(crontab|schtasks|launchctl|systemctl)\b|\breg(\.exe)?\s+add\b|\bsetx\b/i, 'changes privileges or persistence'],
   [new RegExp(String.raw`\bgit\s+config\s+.*(--global|--system)|core\.hookspath|${STARTUP.source}`, 'i'), 'modifies git hooks, shell startup files or global config'],
-  [/universal-auto-mode|\buam\b|:7717\b/i, 'targets the auto-mode daemon itself'],
+  [/auto[-_]mode|:7717\b/i, 'targets the auto-mode daemon itself'],
 ];
 
 export const HIGH = [

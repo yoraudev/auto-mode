@@ -98,7 +98,7 @@ export function createHandlers({ client, store }) {
       const what = describe(input)
       store.update(session, (state) => (state.pending[key] = { what, reason: decision.reason }))
       return deny(
-        `Auto mode holds this ${input.tool_name} call until the user confirms it (universal-auto-mode: ${decision.reason}). Do not look for another way to do the same thing. Tell the user what you wanted to run and why, and that they can allow it by sending the message "${COMMAND} allow". If they do, make exactly the same call again.`,
+        `Auto mode holds this ${input.tool_name} call until the user confirms it (auto-mode: ${decision.reason}). Do not look for another way to do the same thing. Tell the user what you wanted to run and why, and that they can allow it by sending the message "${COMMAND} allow". If they do, make exactly the same call again.`,
         `Auto mode is holding a ${input.tool_name} call: ${decision.reason}. Send "${COMMAND} allow" to allow it: ${what}`,
       )
     },

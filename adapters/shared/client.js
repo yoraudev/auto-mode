@@ -7,7 +7,7 @@ import { loadConfig } from "../../daemon/config.mjs"
 import { classify } from "../../daemon/risk.mjs"
 
 const DAEMON = fileURLToPath(new URL("../../daemon/server.mjs", import.meta.url))
-const LOG_DIR = join(homedir(), ".cache", "universal-auto-mode")
+const LOG_DIR = join(homedir(), ".cache", "auto-mode")
 const LOG_FILE = join(LOG_DIR, "daemon.log")
 const LOG_MAX_BYTES = 5 * 1024 * 1024
 const START_INTERVAL_MS = 15000
@@ -26,28 +26,28 @@ export function rotate(file, maxBytes = LOG_MAX_BYTES) {
 }
 
 const BREAKAWAY =
-  "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:UAM_LAUNCH; " +
+  "Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $env:AUTO_MODE_LAUNCH; " +
   "ProcessStartupInformation = (New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }) } | Out-Null"
 
 export function breakawayLine(env, node, daemon) {
-  const settings = Object.entries(env).filter(([key, value]) => key.startsWith("UAM_") && key !== "UAM_LAUNCH" && value !== undefined)
+  const settings = Object.entries(env).filter(([key, value]) => key.startsWith("AUTO_MODE_") && key !== "AUTO_MODE_LAUNCH" && value !== undefined)
   return `cmd.exe /d /s /c "${settings.map(([key, value]) => `set "${key}=${value}"&& `).join("")}"${node}" "${daemon}""`
 }
 
 function launchDaemon(options, port) {
-  const env = { ...process.env, UAM_PORT: String(port) }
-  if (options.modelsDir) env.UAM_MODELS_DIR = options.modelsDir
+  const env = { ...process.env, AUTO_MODE_PORT: String(port) }
+  if (options.modelsDir) env.AUTO_MODE_MODELS_DIR = options.modelsDir
   mkdirSync(LOG_DIR, { recursive: true })
   rotate(LOG_FILE)
   if (options.breakaway && process.platform === "win32") {
-    const line = breakawayLine({ ...env, UAM_LOG: LOG_FILE }, options.node ?? process.execPath, DAEMON)
-    const starter = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", BREAKAWAY], { env: { ...env, UAM_LAUNCH: line }, stdio: "ignore", windowsHide: true })
-    starter.on("error", (error) => console.error("[universal-auto-mode] could not start the daemon:", error.message))
+    const line = breakawayLine({ ...env, AUTO_MODE_LOG: LOG_FILE }, options.node ?? process.execPath, DAEMON)
+    const starter = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", BREAKAWAY], { env: { ...env, AUTO_MODE_LAUNCH: line }, stdio: "ignore", windowsHide: true })
+    starter.on("error", (error) => console.error("[auto-mode] could not start the daemon:", error.message))
     return
   }
   const log = openSync(LOG_FILE, "a")
   const child = spawn(options.node ?? "node", [DAEMON], { env, detached: true, stdio: ["ignore", log, log], windowsHide: true })
-  child.on("error", (error) => console.error("[universal-auto-mode] could not start the daemon:", error.message))
+  child.on("error", (error) => console.error("[auto-mode] could not start the daemon:", error.message))
   child.unref()
 }
 

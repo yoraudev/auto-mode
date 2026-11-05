@@ -77,7 +77,7 @@ test('writing a startup file, a hook or the harness configuration is critical', 
   const home = process.platform === 'win32' ? 'C:\\Users\\u' : '/home/u';
   const join = (...parts) => parts.join(process.platform === 'win32' ? '\\' : '/');
   const write = (path) => classify({ kind: 'write', paths: [path], cwd }).risk;
-  for (const path of [join(home, '.bashrc'), join(home, '.zshenv'), join(home, '.gitconfig'), join(home, '.config', 'universal-auto-mode', 'config.json'), join(home, '.config', 'opencode', 'opencode.json'), join(home, '.pi', 'agent', 'settings.json'), join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.bat'), join(home, 'Library', 'LaunchAgents', 'x.plist'), '.husky/pre-commit', 'opencode.jsonc', '.opencode/plugin.js', join(import.meta.dirname, '..', 'daemon', 'risk.mjs')])
+  for (const path of [join(home, '.bashrc'), join(home, '.zshenv'), join(home, '.gitconfig'), join(home, '.config', 'auto-mode', 'config.json'), join(home, '.config', 'opencode', 'opencode.json'), join(home, '.pi', 'agent', 'settings.json'), join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.bat'), join(home, 'Library', 'LaunchAgents', 'x.plist'), '.husky/pre-commit', 'opencode.jsonc', '.opencode/plugin.js', join(import.meta.dirname, '..', 'daemon', 'risk.mjs')])
     assert.equal(write(path), 'critical', path);
   assert.equal(write('package.json'), 'medium');
   assert.equal(write(join(home, 'notes.txt')), 'high');

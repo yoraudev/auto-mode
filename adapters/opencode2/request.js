@@ -3,7 +3,7 @@ const WRITE = new Set(["edit"])
 const NETWORK = new Set(["webfetch", "websearch"])
 const HARMLESS = new Set(["question"])
 
-export const REASON_PREFIX = "universal-auto-mode: "
+export const REASON_PREFIX = "auto-mode: "
 
 export function toRequest(evaluation, cwd) {
   const { action, resources, metadata = {} } = evaluation
