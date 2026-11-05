@@ -2,17 +2,24 @@ name: Release
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
+    paths:
+      - "daemon/**"
+      - "adapters/**"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -32,20 +39,8 @@ jobs:
           npm run docs:policy
           git diff --exit-code docs/policy.md
 
-      - name: Check for source changes
-        id: source
-        run: |
-          base="${{ github.event.before }}"
-          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then base=$(git rev-list --max-parents=0 HEAD); fi
-          if git diff --quiet "$base" "${{ github.sha }}" -- daemon adapters package.json package-lock.json; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Compute version
         id: version
-        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: |
           base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
           last=$(git tag --list "v${base}.*" | sed "s/^v${base}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
@@ -54,7 +49,6 @@ jobs:
           echo "Releasing v${base}.${patch}"
 
       - name: Package
-        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: |
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           mkdir release
@@ -63,7 +57,6 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
 
       - name: Publish release
-        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: gh release create "v${VERSION}" release/* --target "$GITHUB_SHA" --title "v${VERSION}" --generate-notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
