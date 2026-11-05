@@ -1,12 +1,12 @@
 {
   "name": "auto-mode",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Prompt-injection-aware auto-approval for AI coding agents",
+  "description": "Remote decision-model guard for coding-agent actions and tool output",
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "files": [
-    "daemon",
+    "core",
     "adapters",
     "docs",
     "README.md",
@@ -14,17 +14,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "daemon": "node daemon/server.mjs",
     "test": "node --test \"test/*.test.mjs\"",
-    "test:e2e": "node e2e/run.mjs",
-    "docs:policy": "node scripts/generate-policy-doc.mjs",
-    "bench": "node bench/build-dataset.mjs && node bench/run.mjs && node bench/report.mjs"
-  },
-  "dependencies": {
-    "@huggingface/transformers": "^4.3.1",
-    "onnxruntime-node": "1.30.0"
-  },
-  "devDependencies": {
-    "@opencode/plugin": "^2.0.26"
+    "test:e2e": "node e2e/run.mjs"
   }
 }

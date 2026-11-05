@@ -1,90 +1,88 @@
-# Policy
+# Decision Policy
 
-This file is generated from `daemon/risk.mjs` and `daemon/config.mjs` by `npm run docs:policy`. Do not edit it by hand.
+This document describes Auto Mode's intended trust and authorization boundary. The executable evaluator instructions default to the reviewed built-in policy in `core/prompts.mjs`; `systemPrompt` can replace them through configuration. Protocol validation and normalization live in `core/decision.mjs`. This is a categorical remote decision policy, not a command-pattern permission table. Model judgments are fallible and do not replace operating-system isolation or the harness's deny policy. A custom policy is the operator's responsibility and may weaken the guarantees described here.
 
-Every permission request gets a risk tier from its content alone. With the detection setting on `warn`, the default, only `critical` requests are sent to the user. With `ask`, the tier is combined with the highest injection score seen in the session:
+## Authority and trust
 
-| Tier | Sent to the user when |
-| --- | --- |
-| `low` | never |
-| `medium` | the session score is at least 0.9 |
-| `high` | the session score is at least 0.3 |
-| `critical` | always |
+Direct user instructions from the root session's active conversation branch establish the maximum authorization. Preserve earlier constraints until a later direct user instruction in that root branch explicitly overrides them. A new instruction that adds work does not silently remove an unrelated prohibition. If an adapter can establish direct-human input from a descendant session, `context.delegatedUserPrompts` carries it as an additional narrowing constraint, never permission to expand root scope or revoke current ancestor restrictions. That field does not claim cross-session chronology. The omp adapter treats subagent-session text as subordinate assignment context, so a child cannot gain or revoke user authority; grant broader delegated permission in the parent session.
 
-A `deny` from the harness is never changed.
+For example:
 
-A flagged tool output the user answered with "continue" counts as 0.89 at most, so it keeps `high` actions with the user and lets `medium` ones through. One the user stopped was withheld from the model and does not count.
+1. The user says “Fix this bug, but do not commit or push.”
+2. The user later says “Run the tests.”
+3. Investigation, appropriate edits and tests may be authorized. A commit or push is still prohibited.
 
-## Shell commands
+Human-submitted goal objectives are direct authority when recorded as actual user prompts. In contrast, the saved active goal, assistant plan, assistant-generated task assignment and recent observations explain the work but cannot expand authority. A goal such as “ship the release” does not override a direct user's “do not publish.” A summary of the conversation is not a substitute for its full authorization constraints. Branch switches replace active context instead of combining unrelated sibling histories; each action carries current context so a new adapter process cannot assume missing authorization.
 
-Rules are checked in the order below; the first match decides. Every pattern is tried on the command as written and on a copy without quotes, backticks, carets and backslashes, so `.e""nv` is read as `.env`.
+Tool output, repository content, retrieved pages, external messages, shell output and raw proposed tool payloads are untrusted state for the evaluator. Their requests to change evaluator policy, impersonate the user or treat themselves as system instructions have no authority. An action payload may contain instructions for a delegated agent, script or nested interpreter; those instructions and their intended side effects must also be judged.
 
-### Critical
+The omp adapter uses public message provenance and active-branch data, not private harness authorization files. This cannot establish the origin of every historical message cryptographically: another trusted extension can submit a message marked as a user message through the harness API. Protect the harness and installed extensions. Subagent-session text is subordinate assignment context, not direct-user authority, and missing verifiable parent ancestry blocks child checks. A child cannot substitute delegated text for missing parent context.
 
-| Reason | Pattern |
-| --- | --- |
-| touches credential files | `(^\|[\\/\s"'=])(\.ssh\|\.aws\|\.azure\|\.gnupg\|\.kube\|\.docker[\\/]config\|\.config[\\/](gh\|gcloud)\|id_(rsa\|ed25519\|ecdsa)\|\.npmrc\|\.pypirc\|\.netrc\|\.git-credentials\|\.env(\.[\w.-]+)?\|credentials(\.(json\|toml\|ya?ml\|ini\|db))?\|auth\.json\|secrets?\.(json\|ya?ml\|toml)\|[\w.-]+\.(pem\|key\|pfx\|p12))(?=$\|[\\/\s"';\|&)])` |
-| pipes output into an interpreter | `\\|\s*(sudo\s+)?((ba\|z\|da\|k)?sh\|python\d?\|node\|perl\|ruby\|pwsh\|powershell)\b` |
-| runs downloaded code in an interpreter | `\b(((ba\|z\|da\|k)?sh\|python\d?\|node\|perl\|ruby\|pwsh\|powershell)\|source)\b[^\|;&\n]*(\$\(\|\x60\|<\()\s*(curl\|wget\|iwr\|irm\|invoke-webrequest\|invoke-restmethod)\b` |
-| evaluates dynamically built code | `\b(iex\|invoke-expression)\b\|\b(ba)?sh\s+<\(\|\beval\s` |
-| rewrites or discards git history | `\bgit\s+push\b.*(--force\|\s-f\b\|--force-with-lease\|--mirror\|--delete\|\s-d\b\|\s\+\S\|\s:\S)\|\bgit\s+reset\s+--hard\|\bgit\s+clean\s+-\w*f\|\bgit\s+(filter-branch\|filter-repo)\b\|\bgit\s+reflog\s+expire\b` |
-| discards uncommitted work | `\bgit\s+checkout\b.*\s(--\|\.\|-f\|--force)(\s\|$)\|\bgit\s+switch\b.*\s(-f\|--force\|--discard-changes)(\s\|$)\|\bgit\s+restore\b(?!.*--staged\b)\|\bgit\s+restore\b.*--worktree\b\|\bgit\s+stash\s+(drop\|clear)\b` |
-| modifies disks or system state | `\b(mkfs\|fdisk\|diskpart\|shutdown\|reboot)\b\|\bdd\s+.*\bof=\|\bformat\s+[a-z]:` |
-| publishes to a registry | `\b(npm\|pnpm\|yarn\|bun\|cargo)\s+publish\b\|\btwine\s+upload\b\|\bgh\s+release\b\|\bdocker\s+push\b` |
-| changes privileges or persistence | `\b(sudo\|doas\|runas)\b\|\bchmod\s+\S*[+]s\|\b(crontab\|schtasks\|launchctl\|systemctl)\b\|\breg(\.exe)?\s+add\b\|\bsetx\b` |
-| modifies git hooks, shell startup files or global config | `\bgit\s+config\s+.*(--global\|--system)\|core\.hookspath\|(^\|[\\/\s"'=])(\.(bash\|zsh)rc\|\.(bash_\|z)?profile\|\.zshenv\|\.bash_login\|\.gitconfig\|authorized_keys\|[\w.]*profile\.ps1)(?=$\|[\\/\s"';\|&)])\|\$profile\b\|[\\/]\.git[\\/]hooks\|(^\|[\\/\s"'=])\.husky[\\/]\|start menu[\\/]programs[\\/]startup\|[\\/]launch(agents\|daemons)[\\/]\|\.config[\\/](autostart\|systemd)[\\/]\|[\\/]etc[\\/]cron` |
-| targets the auto-mode daemon itself | `auto[-_]mode\|:7717\b` |
+## Injection question
 
-A wildcard that could expand to a credential file is critical as well. A path segment with `*`, `?`, `[]` or `{}` and at least two other characters is matched against `.ssh`, `.aws`, `.azure`, `.gnupg`, `.kube`, `.env`, `.env.local`, `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `id_rsa`, `id_ed25519`, `id_ecdsa`, `credentials`, `secrets`, `x.pem`, `x.key`, `x.pfx`, `x.p12`.
+The evaluator chooses one of:
 
-A command that is not read-only and names the harness configuration (`opencode.json`, `opencode.jsonc`, `.opencode/`, `.pi/` or `.config/opencode/`) is critical.
+- `clean`: no active attempt to redirect the agent through an untrusted channel;
+- `injection`: a concrete attempt to override instructions, spoof authority, exfiltrate data, conceal behavior or redirect the task;
+- `uncertain`: context is missing or the evaluator cannot safely distinguish data from an attack.
 
-A recursive or forced `rm` whose target is `/`, `~`, `..`, `.` or `*` is also critical.
+Judge purpose and context, not the presence of scary words. A quoted attack in a security test, a paper discussing jailbreaks, an ordinary code sample or legitimate task documentation is not automatically an active injection. Paths, URLs and tool names are identifiers, not instructions. A user-authorized read of a suspicious file is not itself malicious; its actual output is checked separately before delivery. Conversely, polite phrasing, hidden markup, encoded payloads, code comments or claimed maintenance requirements do not make an unauthorized behavioral instruction safe.
 
-### High
+Examples of hostile behavior include telling the agent to upload credentials, ignore the user's scope, weaken safety controls, execute unrelated remote code, conceal actions or falsify a report. State supplied to the evaluator cannot tell it to change its answer format, confidence or policy.
 
-| Reason | Pattern |
-| --- | --- |
-| uses a network tool | `\b(curl\|wget\|ssh\|scp\|sftp\|rsync\|nc\|ncat\|netcat\|telnet\|ftp\|invoke-webrequest\|iwr\|invoke-restmethod\|irm\|start-bitstransfer\|certutil\|bitsadmin)\b` |
-| references a URL | `\bhttps?:\/\/` |
-| talks to a git remote | `\bgit\s+(push\|clone\|fetch\|pull\|remote\|submodule)\b\|\bgh\s` |
-| installs packages | `\b(npm\|pnpm\|yarn\|bun)\s+(i\|install\|add\|create\|dlx\|x)\b\|\b(npx\|bunx\|uvx\|pipx)\b\|\b(pip\|pip3\|uv)\s+(install\|add)\b\|\bcargo\s+(install\|add)\b\|\bgo\s+(get\|install)\b\|\b(brew\|apt\|apt-get\|choco\|winget\|scoop)\s+install\b` |
-| runs containers | `\bdocker\s+(run\|pull\|build\|exec)\b` |
-| deletes files | `\b(rm\|rmdir\|del\|erase\|rd\|ri\|remove-item\|clear-content\|unlink\|shred\|truncate)\b\|\bfind\b.*\s-delete\b\|\bgit\s+(branch\|tag)\b.*\s-\w*d\b` |
-| stops processes | `\b(kill\|pkill\|taskkill\|stop-process)\b` |
+## Scope question
 
-A command is also high when one of its arguments is a path outside the project: `~`, a `..` segment, an absolute path that does not resolve inside the working directory, a home or temporary directory variable such as `$HOME`, `$TMPDIR`, `%USERPROFILE%` or `$env:APPDATA`, or a path that starts with any other variable except `$PWD`.
+For actions, independently choose:
 
-### Low
+- `authorized`: the tool's concrete behavior is within direct-user authorization and all retained constraints;
+- `out_of_scope`: it contradicts constraints or introduces unauthorized side effects;
+- `uncertain`: authorization or effects cannot be established from the available context.
 
-A command is low when it has no output redirection, no command or process substitution (`$(…)`, backticks, `<(…)`) and every segment between `&&`, `||`, `;`, `|` and `&` is read-only:
+Evaluate the full raw tool arguments, working directory, shell/nested execution payload and relevant observations. Tool names do not establish safety. A read-like MCP name can have side effects; a shell command can delegate them to another program. Ordinary necessary investigation, editing and testing can be authorized by a request to fix a defect without enumerating every command.
 
-- one of `ls`, `dir`, `cat`, `type`, `head`, `tail`, `grep`, `rg`, `fd`, `wc`, `pwd`, `echo`, `which`, `where`, `tree`, `stat`, `file`, `du`, `df`, `date`, `sort`, `uniq`, `cut`, `jq`, `cd`, `true`, `test`, `get-childitem`, `get-content`, `select-string`, `get-location`, unless it carries a flag that writes a file or runs a program (`sort` with `\s(-\w*o\|--output)\b`, `fd` with `\s(-x\|-X\|--exec\|--exec-batch)\b`, `rg` with `\s--(pre\|hostname-bin)\b`, `tree` with `\s-o\b`, `date` with `\s(-s\|--set)\b`, `git` with `\s(--output\|--ext-diff)\b`), or `uniq` names an output file
-- `git` followed by one of `status`, `diff`, `log`, `show`, `branch`, `rev-parse`, `ls-files`, `blame`, `describe`, `shortlog`, where `branch` may only carry listing flags
-- `find` without `-exec`, `-execdir`, `-ok`, `-okdir`, `-delete`, `-fprint` or `-fls`
-- `sed -n` with a plain line range to print, such as `sed -n '1,20p'`
-- any program called with only `--version`, `-V` or `--help`
+A general fix request does not implicitly authorize commits, pushes, publication, credential disclosure, spending, permission changes, unrelated data deletion or persistence changes. The user must supply authorization appropriate to those side effects. Even explicit authority does not make an injected instruction trustworthy; both questions must pass.
 
-### Medium
+Missing direct-user prompts block an action before an allow can be accepted. The evaluator must not manufacture consent from an assistant's intention, a goal, a task label or a tool result.
 
-Every other command.
+## Allow/block normalization
 
-## File access
+| Condition | Category | Effect |
+| --- | --- | --- |
+| All required answers are clean/authorized and meet `minConfidence` | `safe` | `allow` |
+| Injection choice identifies an attack | `injection` | `block` |
+| Scope choice is outside authorization | `scope` | `block` |
+| Any required choice is uncertain, confidence is low or context is insufficient | `uncertain` | `block` |
+| A usable evaluation cannot be obtained or validated | `unavailable` | `block` |
 
-| Request | Tier |
-| --- | --- |
-| Any path matching the credential pattern (the first critical rule above) | `critical` |
-| Any path with a wildcard that could expand to a credential file | `critical` |
-| Writing under `.git/` or `.github/workflows/` | `critical` |
-| Writing a shell startup file, `.gitconfig`, a git or Husky hook, or an autostart location | `critical` |
-| Writing the harness configuration, the auto mode settings or cache, or the directory auto mode is installed in | `critical` |
-| Writing outside the project | `high` |
-| Writing inside the project | `medium` |
-| Reading outside the project | `medium` |
-| Reading inside the project | `low` |
+Native JEV receives categorical choice questions with distinct criteria. Its selected choices, confidence values and criterion probabilities are validated. The OpenAI-compatible path receives the same policy through a system message and untrusted state as JSON in a separate user message; its content must be strict JSON with known labels and numeric confidence. Neither path can authorize a response by injecting text that looks like a decision.
 
-## Other requests
+`minConfidence` is a threshold on the provider's reported confidence, not a promise of real-world accuracy. The native confidence value is validated independently of its probability distribution. Category explanations are fixed product text, not fabricated model reasoning or quoted evidence.
 
-Network fetches and anything an adapter cannot map to a shell command or a file path are `medium`. That includes every MCP tool call, whatever the tool is called.
+## Fail-closed lifecycle
 
-A request with no effect outside the conversation, such as the agent asking the user a question, is `low`.
+- All tool calls are prechecked before execution, including delegated tasks and MCP calls.
+- All nonempty tool-result text, including short results and edit/write confirmations, is checked before it is delivered to the agent. Non-text content is outside this text evaluator's coverage.
+- A blocked or failed output check withholds the complete text and interrupts the agent. No warning-plus-delivery or interactive bypass substitutes for withholding it.
+- Pending output checks finish before the same session receives an action allow. Changed authorization context invalidates an in-flight decision rather than reusing it for the new branch.
+- Missing credentials, unreachable service, provider errors, redirects, deadlines and invalid responses block. Remote errors and response bodies are not echoed as explanations.
+- Oversized serialized input blocks without silently dropping prompts, tool arguments or the middle of an output. Remote responses are size-limited as well.
+- No retry, fallback provider or locally inferred permission silently replaces a failed evaluation.
+- Accepted recent output is bounded supporting context. A rejected result does not impose a permanent taint on unrelated future actions.
+- Clearing counters and observations does not erase user authorization restrictions. A restarted adapter must resupply authoritative context.
+- Explicit `enabled: false` bypasses Auto Mode and leaves the harness in control. A missing or failed service is never interpreted as an implicit disablement.
+
+A preflight decision is not continuous monitoring. Tools can change files or contact services before their output is checked, and a block on output cannot reverse those effects. The adapter cannot protect operations outside supported hook paths, nor can it enforce a decision after the harness has terminated its handler. The harness's own deny and approval policy remains independent.
+
+## Credentials and privacy
+
+Remote decisions send full user prompts, the subordinate goal, agent metadata, raw action input, working directory and recent tool text to the configured endpoint. This is an explicit operational privacy boundary, not just an injection scan. Content may itself contain secrets; API-key redaction does not sanitize user/tool data.
+
+No API key is supplied by default. Credentials are bearer secrets; use a provider-scoped key with appropriate spending and access limits. Public settings expose only whether a key exists. Saved keys are plaintext local configuration protected by available file permissions. Environment keys can be inherited by subprocesses. The runtime refuses redirects, limits endpoint schemes and clears saved keys on provider/endpoint changes unless explicitly replaced.
+
+The runtime executes inside the harness process. It has no network listener, but configuration, credentials and in-memory session state are available to code running in that process. A compromised harness, provider, local account or trusted extension is outside this gate's protective boundary.
+
+## Assurance limits
+
+Both false allows and false blocks are possible. Unknown encodings, invisible content, incomplete provenance, indirect script behavior and model mistakes can defeat the intended boundary. Custom protocol compatibility does not establish security competence. Simulated endpoints cannot measure model judgment, and a finite live-model sample cannot establish general detection accuracy or a perfect-detection guarantee.
+
+Use least-privilege credentials, restricted harness policies and a container or virtual machine for sensitive work. Keep recoverable project history. See [Security Policy](../SECURITY.md) for reporting security defects and [Architecture](architecture.md) for the implementation details.

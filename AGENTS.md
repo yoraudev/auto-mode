@@ -2,23 +2,29 @@
 
 ## Tech Stack
 
-- **Language:** JavaScript (ES modules)
-- **Runtime:** Node.js (daemon), the host agent's plugin runtime (adapters)
-- **Layout:** `daemon/` (local service), `adapters/` (one directory per harness, plus `shared/` for code every adapter uses), `bench/` (classifier benchmark), `e2e/`, `test/`, `scripts/`
-- **Classifier:** Horizon-Labs/prompt-injection-guard (`base` by default, `small` optional), quantized ONNX
-- **Inference:** `onnxruntime-node` on CPU by default, optionally on a GPU through its DirectML, WebGPU, CUDA or CoreML providers; tokenizer from `@huggingface/transformers`
-- **Daemon ↔ adapter transport:** HTTP with JSON bodies on `127.0.0.1`
-- **OpenCode adapter:** `@opencode/plugin` 2.x (Promise plugin API for the server part, terminal UI plugin API with Solid JSX for the settings command)
-- **Pi adapter:** a Pi extension in plain JavaScript (`tool_call` and `tool_result` events, `/auto-mode` command), loaded by Pi without a build step
-- **Codex CLI adapter:** command hooks in plain JavaScript (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest` and `PostToolUse`), one Node.js process per event, registered in `~/.codex/hooks.json` by an install script
-- **Tests:** `node:test` (unit), a scripted run against a real daemon (end-to-end)
-- **CI / releases:** GitHub Actions; `dev` is the working branch, `main` only receives merges, and a source-changing merge to `main` publishes a release
+- **Language:** JavaScript ES modules.
+- **Runtime:** Node.js 22 or newer for the shared runtime; the host harness's extension runtime for adapters.
+- **Layout:** `core/` for configuration, evaluator prompts, remote protocols and the in-process session guard; `adapters/shared/` for the shared adapter runtime and UI metadata; `adapters/omp/` for omp hooks; `test/` and `e2e/` for boundary tests.
+- **Decision providers:** Typesafe's native JEV System One API by default; a configurable custom endpoint using OpenAI-compatible chat completions. No key is bundled and no local inference is performed.
+- **Transport:** authenticated HTTPS from the in-process runtime to the chosen remote provider, with loopback HTTP allowed for development endpoints. No local service is started.
+- **omp adapter:** Plain JavaScript extension using action/result hooks and `/auto-mode`, loaded without a build step.
+- **Tests:** `node:test` for consumer-visible behavior and an in-process integration runner against a loopback provider fixture.
+- **CI/releases:** GitHub Actions; `dev` is the working branch, `main` receives merges only, and a source-changing merge to `main` publishes a release.
+
+## Security Invariants
+
+- Check every action before execution against complete root direct-user authorization, retaining previous constraints. A human-submitted goal objective is authority through its user prompt; a saved goal, assistant plan or child-session text is subordinate context and cannot expand ancestor permission.
+- Check exposed tool-result text before delivery. Withhold blocked text and interrupt the agent; do not add a warning and pass hostile content through.
+- Fail closed on unavailable, uncertain, missing-context, oversized or malformed evaluations. Explicit disablement is the only bypass. An allow never overrides the harness's own denial.
+- Keep evaluator policy separate from hostile state. The default `systemPrompt` is the reviewed baseline; a custom replacement can weaken protection. Use the actual native choice protocol for JEV and strict JSON for the custom OpenAI protocol; do not fabricate model reasoning or native accuracy claims.
+- Keep API keys write-only through public APIs and redact errors. Provider/endpoint changes must not silently forward stored credentials. Document that prompts, code and raw tool content are sent to the selected endpoint and that local secrets remain plaintext.
+- Test observable boundaries rather than source-text structure. Paid-provider accuracy is not established by simulated responses.
 
 ## Project Rules
 
 - Work happens on `dev`. `main` is protected and changes only by merging a pull request from `dev`; a source-changing merge publishes a release. Never push to `main` directly. Keep `dev` after merging.
-- Every file in the repository is written in English: code, identifiers, user-facing strings, documentation and commit messages. The only exception is attack samples in other languages inside `bench/payloads.mjs`, which exist to test multilingual detection.
-- Commit messages follow Conventional Commits: `type(scope): description`, with types such as `feat`, `fix`, `chore`, `docs`, `refactor`, `test` and `ci`. Mark breaking changes with `!` after the type. Keep the subject line short and make it the best single description of the change; put the details in the commit body, written out in full.
-- Commits, pull requests and anything else published to the repository carry only the repository owner's name and email. Never add AI or tool attribution: no `Co-Authored-By` trailers, no "Generated with" lines, no assistant names as author or committer.
-- Do not write comments. Every hand-written file (anything that is not auto-generated) stays free of code comments, including config files such as YAML and `.gitattributes`.
-- Whenever something is added to, changed in, or removed from the project, every `.md` file that references it must be updated in the same change.
+- Every repository file is written in English: code, identifiers, user-facing strings, documentation and commit messages.
+- Commit messages follow Conventional Commits: `type(scope): description`, with types such as `feat`, `fix`, `chore`, `docs`, `refactor`, `test` and `ci`. Mark breaking changes with `!` after the type. Keep the subject short and descriptive; write details in the body.
+- Commits, pull requests and other published repository material carry only the repository owner's name and email. Never add AI/tool attribution, `Co-Authored-By` trailers, generated-with lines or assistant authorship.
+- Do not write code comments. Every handwritten code/config file, including YAML and `.gitattributes`, stays free of comments.
+- Update every Markdown file that references added, changed or removed behavior in the same change. Keep README, architecture, policy and security limitations aligned with real interfaces.

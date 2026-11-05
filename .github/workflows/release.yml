@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "daemon/**"
+      - "core/**"
       - "adapters/**"
       - "package.json"
       - "package-lock.json"
@@ -33,11 +33,6 @@ jobs:
 
       - run: npm ci
       - run: npm test
-
-      - name: Check generated docs
-        run: |
-          npm run docs:policy
-          git diff --exit-code docs/policy.md
 
       - name: Compute version
         id: version
