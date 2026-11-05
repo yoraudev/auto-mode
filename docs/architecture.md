@@ -1,209 +1,189 @@
 # Architecture
 
-Auto Mode has one long-running part and one thin part per harness.
+Auto Mode keeps harness-specific hooks thin and shares the security logic between adapters. The current flow is in-process:
 
+```text
+omp hooks -> adapters/omp -> adapters/shared/runtime -> core/guard -> core/decision -> configured endpoint
 ```
-agent harness ──plugin hooks──> adapter ──HTTP 127.0.0.1:7717──> daemon ──> classifier (ONNX, CPU or GPU)
+
+There is no local listener or separate service. The guard retains current authorization context, recent accepted text and pending output checks in memory inside the harness process. A future adapter imports the same `core/` and `adapters/shared/` modules and supplies only its event mapping and UI.
+
+## Modules
+
+| Path | Responsibility |
+| --- | --- |
+| `core/config.mjs` | Defaults, validation, file/environment configuration, safe runtime changes and public secret redaction. |
+| `core/prompts.mjs` | Evaluator policy, categorical questions and protocol-specific output contracts. |
+| `core/decision.mjs` | Native Typesafe and custom chat-completions transports, bounded response parsing, deadlines and normalized decisions. |
+| `core/guard.mjs` | In-process session context, ordered output checks, action decisions and inherited authorization. |
+| `adapters/shared/runtime.js` | Adapter-facing runtime, result validation and settings calls. |
+| `adapters/shared/settings.js` | Shared setting labels and option metadata. |
+| `adapters/omp/` | omp event hooks, active-branch context capture and settings UI. |
+| `test/` | Consumer-visible protocol, configuration, guard and adapter tests. |
+| `e2e/` | In-process guard and remote-provider integration scenario. |
+
+No build step is required. The runtime and adapters use JavaScript ES modules. Node.js 22 is used by the release workflow.
+
+## Evaluation input
+
+An action carries the original tool name and raw arguments, not a lossy command/path classification:
+
+```json
+{
+  "kind": "action",
+  "context": {
+    "userPrompts": ["Fix the bug. Do not commit.", "Run the relevant tests."],
+    "delegatedUserPrompts": [],
+    "goal": "Fix and verify the bug",
+    "assignment": null,
+    "runtimeId": "12345",
+    "sessionFile": "/sessions/current.jsonl",
+    "parentSessionFile": null,
+    "agent": {
+      "kind": "main",
+      "id": "agent-id",
+      "name": "Main"
+    }
+  },
+  "request": {
+    "tool": "bash",
+    "input": {"command": "npm test"},
+    "cwd": "/project"
+  },
+  "observations": [{"tool": "read", "text": "Recent accepted tool output"}]
+}
 ```
 
-| Directory | Runs in | Role |
+`userPrompts` is the root session's direct-human history in branch order. `delegatedUserPrompts` is a guard field for descendant direct-human requests when an adapter can establish that provenance; those groups can narrow scope, never expand ancestor permission, and do not claim cross-session chronology. The omp adapter carries subagent-session text as subordinate `assignment` context instead, so a child cannot gain or revoke user authority. `goal`, `assignment` and `agent` may be `null`; an agent identity may include `parentId`. `runtimeId` is the adapter process identifier as a string. `sessionFile` comes from public `getSessionFile()` or is `null`. `parentSessionFile` comes from public `getHeader().parentSession` when it is path-like, otherwise `null`; these paths identify lineage without reading private authorization files. A child assignment is model-authored task context, not direct-user authorization.
+
+Output evaluations use `kind: "output"` and `output: {tool, text}` instead of `request`, with the same authorization context. Action evaluations also receive bounded recent accepted observations, not a complete audit log. The entire serialized input is compared with `maxInputChars`; oversized input blocks without silent truncation. No model-generated summary replaces authoritative user prompts.
+
+## Decision result
+
+Enabled checks return:
+
+```json
+{
+  "effect": "allow",
+  "category": "safe",
+  "reason": "A fixed explanation of the decision category",
+  "confidence": 0.95
+}
+```
+
+| Condition | Category | Effect |
 | --- | --- | --- |
-| `daemon/` | Node.js | Loads the classifier, scores tool output, keeps per-session state, decides on permission requests |
-| `adapters/opencode2/` | OpenCode 2 plugin runtime | Forwards tool output and permission requests to the daemon and applies its answers |
-| `adapters/pi/` | Pi extension runtime | The same for Pi, and asks the user itself because Pi has no permission prompts |
-| `adapters/codex/` | A Node.js process per Codex hook | The same for Codex CLI, with questions and settings carried by the conversation |
-| `adapters/shared/` | Whichever adapter imports it | The daemon client, the texts given to the model, and the list of settings |
-| `bench/` | Node.js | Compares classifiers on tool outputs with planted injections |
+| All required answers are clean/authorized and meet `minConfidence` | `safe` | `allow` |
+| Injection choice identifies an attack | `injection` | `block` |
+| Scope choice is outside authorization | `scope` | `block` |
+| A required answer is uncertain, confidence is low or context is insufficient | `uncertain` | `block` |
+| A usable evaluation cannot be obtained or validated | `unavailable` | `block` |
 
-The classifier runs in a separate process because it needs a native ONNX runtime and takes several seconds to load. One daemon serves every harness and every session on the machine.
+Transport, configuration, timeout, oversized-response and malformed-response failures normalize to an unavailable block. Error messages do not echo provider response bodies, raw credentials or arbitrary exception text. There are no remote retries or fallback providers. Category reasons are fixed product explanations, not model-generated evidence.
 
-## Daemon
+The guard also validates a decision returned by an injected runtime or provider adapter; an unknown effect, category, reason or confidence blocks instead of allowing.
 
-`server.mjs` is an HTTP server bound to `127.0.0.1`. Requests and responses are JSON.
+## Remote transports
 
-| Endpoint | Body | Answer |
-| --- | --- | --- |
-| `GET /health` | | `ok`, `ready` (also true while the classifier is unloaded and would load on demand), `model`, `device`, `status` |
-| `POST /scan` | `session`, `source`, `text`, optional `budgetMs`, optional `ui`, optional `missed` | `pending`, and when finished `score`, `level`, `ms`, `truncated`, plus `excerpt` for a flagged output, `review` when the user is being asked, `decision` when they already answered, or `trusted` when the text is on the trust list |
-| `POST /decide` | `session`, `request` | `effect` (`allow` or `ask`), `reason`, `risk`, `score` |
-| `POST /ui` | `after`, `sessions` | `seq`, the `notices` newer than `after`, and the pending `reviews` for the listed sessions |
-| `POST /review` | `id` | `decision` (`continue`, `stop` or `unanswered`), or `pending` after 20 seconds without an answer |
-| `POST /review/answer` | `id`, `decision` | `ok`, or `error` |
-| `POST /turn` | `session` | `ok`; ends the effect of an earlier answer |
-| `POST /session` | `session` | `score`, `level`, `flags`, `pending`, `unscanned` |
-| `POST /clear` | `session` | the session after its score and flags were reset |
-| `POST /trust` | `session` | the session after a clear, `added` (how many flagged outputs were put on the trust list) and `trusted` (the size of the list) |
-| `POST /trust/reset` | | `trusted`, which is then 0 |
-| `GET /config` | | the changeable settings, the provider in use, `trusted` (the size of the trust list) and `status` |
-| `POST /config` | any of the changeable settings | the settings and `status`, or `error` |
+### Native Typesafe
 
-Every response closes its connection. A reused connection can be reset while the daemon is busy loading a classifier, and the request on it would be lost. The adapter's client also repeats a failed call once before it concludes that the daemon is down. A request body over 64 MB is answered with status 413 and not read further.
+A bearer-authenticated POST sends the complete input in `state` and two native System One choice questions:
 
-A request is refused with status 403 when it carries an `Origin` header or when its `Host` is not `127.0.0.1` or `localhost`. Browsers send `Origin` on every cross-site request that can carry a body, so a web page cannot call the daemon, and the `Host` check stops a page that has rebound its own name to the loopback address.
+```json
+{
+  "model": "jev-latest",
+  "state": {
+    "kind": "action",
+    "context": {},
+    "request": {},
+    "observations": []
+  },
+  "questions": {
+    "injection": {
+      "type": "choice",
+      "instructions": "Evaluator policy and injection question",
+      "criteria": {
+        "clean": "No active injection",
+        "injection": "Active injection",
+        "uncertain": "Insufficient evidence"
+      }
+    },
+    "scope": {
+      "type": "choice",
+      "instructions": "Evaluator policy and authorization question",
+      "criteria": {
+        "authorized": "Within user authorization",
+        "out_of_scope": "Outside user authorization",
+        "uncertain": "Insufficient evidence"
+      }
+    }
+  }
+}
+```
 
-### Settings
+This illustrates the protocol shape; actual question policy comes from `core/prompts.mjs`, and real `state` is the complete evaluation input. Output checks omit the scope question. The response supplies `answers.injection` and, for actions, `answers.scope`, each with `type: "choice"`, a known `choice`, a numeric `confidence` and a `probabilities` object covering its criteria. Probabilities must be finite values from 0 to 1, approximately sum to 1 and support the selected highest-probability choice. Confidence is validated independently: it is not assumed equal to the selected probability. An allow must meet `minConfidence` for every required answer.
 
-`config.mjs` holds the defaults, the list of settings that can be changed at runtime with their allowed values, and the config file path (`~/.config/auto-mode/config.json`, or `AUTO_MODE_CONFIG`). At startup every value in the file is checked against the same rules; one that fails is logged and replaced by its default, two that contradict each other (`weak` above `strong`, `overlap` not below `window`) are both replaced, and a file that is not valid JSON is ignored. The file is written through a temporary file that is renamed into place. `POST /config` validates a change. A threshold or a timing value is applied and written to the file before the answer is sent. A change to the model, device, window, overlap or scan limit is answered at once and carried out in the background: the daemon opens a new classifier session, and only when that has succeeded does it swap the session, apply the setting, write the file and close the old session. If it fails, the old session stays in use and nothing is saved. A second such change is refused while one is in progress. `port` and `modelsDir` cannot be changed over HTTP.
+JEV's native choice response does not generate free-form reasoning. Auto Mode does not invent quotations or passages to explain it. See the [official protocol](https://docs.typesafe.ai/api/system-one.md).
 
-`status` tells callers where the classifier is: `loading` with the model name, `downloading` with the model, file, bytes received, total bytes and percentage, `ready`, `idle`, or `error` with a message. `idle` means the classifier was unloaded: every five seconds the daemon checks whether `unloadMinutes` have passed since the last scan started or finished, and if so, and no scan is running, it releases the classifier session. The next `/scan` loads it again and waits for it. Sessions, flags and the trust list are not touched. With `unloadMinutes` at 0 the classifier is never unloaded. When the first load at startup fails, the daemon keeps running in the `error` state; scans then fail, sessions are marked `unscanned`, and a new settings change tries again.
+A gateway accepting the same JEV `state`/question-map protocol can use `provider: "typesafe"` with its own complete endpoint URL and model identifier. The protocol name does not restrict the endpoint to Typesafe's host.
 
-### Models
+### Custom OpenAI-compatible chat completions
 
-`models.mjs` maps `base` and `small` to their Hugging Face repositories, each with a commit hash and the SHA-256 checksum of every file, and downloads the quantized ONNX file, the tokenizer and the config from that commit into `modelsDir` when they are missing. A download is written to a `.part` file, hashed while it arrives, and renamed only when the checksum matches; otherwise the `.part` file is deleted and the attempt counts as failed. Files that are already in `modelsDir` are not hashed again. Moving to a newer revision of a model means changing the commit hash and the checksums together. A download reports its progress five times a second, and is tried up to four times with three seconds in between.
+Selecting `custom` clears the endpoint and model defaults; both must be supplied for the destination. JEV is not available through this option; `typesafe` is its native protocol.
 
-### Scanning
+A bearer-authenticated POST sends `model`, `messages` containing system evaluator policy and a user message with `JSON.stringify(input)`, `temperature: 0` and `response_format: {"type":"json_object"}`. The JSON string in `choices[0].message.content` must have:
 
-`scanner.mjs` tokenizes the text, splits it into windows of 512 tokens that overlap by 64, runs each window through the classifier and returns the highest injection probability. Short windows matter: an injection of one paragraph is diluted in a long document, and the benchmark showed better detection at 512 tokens than at 2,048. Of a text longer than `maxChars`, the first and the last half of `maxChars` characters are scanned as two separate pieces, the middle is not, and the session is then marked `unscanned`. Both ends are covered because an injection usually sits near the end of an output and a harness that shortens a long output tends to keep its ends.
+- `injection`: `clean`, `injection` or `uncertain`;
+- `scope`: `authorized`, `out_of_scope` or `uncertain`, required for actions;
+- `confidence`: finite number from 0 to 1.
 
-When the score reaches `weak`, the scanner looks for the passage to show the user: it scores pieces of 48 tokens, 24 apart, of the window that scored highest, decodes the best one, replaces control characters and line breaks with spaces and cuts it at 240 characters. This `excerpt` is stored with the flag and travels with notices, reviews and the answer of `/scan`. It costs up to 21 short runs, about a second with `base` on the benchmark CPU, and only for flagged outputs.
+No code-fence extraction or prose recovery is performed. Output checks do not require scope. Both protocols use the same final category/effect normalization. Supporting the protocol does not qualify a model as a reliable security evaluator.
 
-Scans run one at a time because inference uses every CPU core, or the whole GPU. Windows are also scored one at a time: scoring 4 or 8 windows in one batch was measured on the benchmark machine and was at most 10 percent faster per window on the CPU, DirectML and WebGPU, which does not pay for the new input shapes it would add on the GPU providers. Within a session, text that was already scanned in full is answered from its stored score instead of being scanned again.
+### Network and credentials
 
-### Device
+Endpoints must use HTTPS except loopback HTTP for local integration/development. URL user information and fragments are rejected. Redirects are rejected rather than forwarding bearer authentication. The request deadline includes reading the response body, and response size is bounded before JSON processing.
 
-`device` selects the ONNX Runtime execution provider. `cpu` is the default. A provider name (`dml`, `webgpu`, `cuda`, `coreml`) is passed to the runtime as given, and a failure to load it stops the daemon. `gpu` asks the runtime which of those providers it supports on this machine, opens a session on each, runs one full window twice and keeps the session whose second run was fastest. Providers that fail to load are skipped, and if none is left the CPU is used. `/health` reports the provider in use.
+`AUTO_MODE_API_KEY` applies only to the provider/endpoint designated by the startup environment: `AUTO_MODE_PROVIDER` defaults to `typesafe`, whose endpoint has a built-in default, while `custom` requires an explicit `AUTO_MODE_ENDPOINT`. A custom file-only destination needs an explicit saved key or a matching `AUTO_MODE_ENDPOINT` plus `AUTO_MODE_API_KEY`. Environment credentials are not forwarded after a runtime target change. `TYPESAFE_API_KEY` is a fallback only for native Typesafe at the official HTTPS origin. The runtime has no bundled key and does not discover credentials from unrelated harness settings.
 
-The CPU is the default for both models because GPU providers are slow on the first run at each new input length, and tool outputs rarely repeat a length. The README lists the other downsides.
+## Session guard
 
-### Sessions
+`core/guard.mjs` is created once by the adapter runtime. It validates and stores the current context per session, retains bounded observations and serializes output checks before actions:
 
-The daemon keeps, per session id, a list of flags (every scan that scored at least `weak`, with its source, score and state), the scans still running, the scores of text already scanned, and the `unscanned` mark. `level` is `strong` from `strong` upward, `weak` from `weak` upward, and `none` below.
+- A context update advances its version; an in-flight result for obsolete context is blocked instead of granting permission for a different state.
+- An action waits for pending output evaluations in the same session. Only an allowed output enters observations. Blocked or unavailable text never becomes ordinary context.
+- A settings change invalidates an in-flight check that started against the previous configuration.
+- The guard registers root authorization with `runtimeId`, agent identity and the exact public session-file path. A child resolves `runtimeId` plus `parentSessionFile` against a registered parent's exact `sessionFile`, falling back to a sticky `runtimeId` plus `agent.parentId` association. Missing or cyclic ancestry blocks.
+- Root prompts establish the maximum authorization. Descendant direct prompts can narrow, never expand or revoke ancestor permission. The omp adapter keeps child-session text in subordinate assignments instead.
+- Clearing counters and observations does not erase user authorization context. The adapter resupplies the current branch at session boundaries and on every action.
 
-A flag is `open`, `acknowledged` or `withheld`. The session score is the highest flag score, where an acknowledged flag counts as just under `strong` at most and a withheld flag does not count.
+The guard is in-memory. A new harness process starts with no session state and must provide context before an action can be allowed.
 
-The daemon keeps the 500 most recently used sessions. When a new one would exceed that, the session used longest ago is dropped, unless it still has a scan running.
+## Configuration lifecycle
 
-### Trust list
+`core/config.mjs` exports `DEFAULTS`, `SETTINGS`, `configPath`, `loadConfig`, `validate`, `saveConfig` and `publicConfig`. `SETTINGS` describes runtime-editable fields. The [README settings table](../README.md#settings) lists fields, defaults and environment overrides.
 
-Each flag remembers the SHA-256 checksum of the text it came from. `POST /trust` puts the checksums of a session's flags, except withheld ones, on the trust list and then clears the session like `/clear`. `/scan` answers for a text on the list at once with score 0 and `trusted: true`, without scanning it. The list holds 1,000 entries, the oldest making room for new ones, and is stored as `trusted.json` next to the config file. `POST /trust/reset` empties it. Only the exact text is trusted, so an edited file is scanned again.
+`systemPrompt` defaults to the built-in `POLICY` from `core/prompts.mjs`. It is a complete replacement, not an appended instruction. It must be nonempty, at most 50,000 characters and free of null characters. `core/decision.mjs` composes the selected policy with the injection question, scope question or chat-completions JSON contract at request time, so both protocols use the same configured text. A custom policy is operator-controlled and can weaken the reviewed safeguards.
 
-### Reviews
+Startup ignores invalid file/environment values with sanitized warnings. Runtime patches reject invalid fields or values. `timeoutMs` is an integer from 1 to 25,000; `maxInputChars` is an integer from 1 to 1,000,000; `minConfidence` ranges from 0 to 1. These are input validation limits, not promises about provider capacity.
 
-A user interface announces the sessions it is showing by calling `/ui` about once a second. With `detection` set to `ask`, when a scan scores at least `strong` in a session announced within the last four seconds, the daemon opens a review for that flag and returns its id from `/scan`. The adapter then calls `/review`, which waits for the answer in rounds of 20 seconds. The interface finds the review in the answer to `/ui`, asks the user and posts the decision to `/review/answer`: `continue` marks the flag acknowledged, `stop` marks it withheld. If the interface stops announcing the session, the review ends as `unanswered` and the flag stays open. A review for a scan that outlasted its budget is marked `late`: the adapter has already passed the output on, so `stop` can only interrupt the session, which the interface does itself.
+Provider changes apply matching endpoint/model defaults unless the patch explicitly provides them. Provider or endpoint changes discard a saved key unless the same patch explicitly supplies a replacement. Invalid startup provider/endpoint settings also discard the associated key instead of risking forwarding it to a fallback destination. Explicit environment keys apply only to their environment-designated destination.
 
-An answer covers the rest of the turn. It settles every other open review of that session the same way, and later strong flags in the session get the same decision without a review until an adapter calls `/turn`, which it does when the user sends the next message. One tool call often produces several different texts that carry the same injection, for example a page's text, its accessibility tree and the wrapper tool's combined output, and asking for each would repeat the same question.
+`saveConfig(patch, env, current)` applies a patch against the effective current configuration and returns the applied configuration. Sequential runtime changes therefore retain current endpoint overrides and credential clearing rather than reloading stale startup values. Runtime patches override startup environment settings until restart; the next launch applies validated environment overrides again. Persistence records effective non-secret settings and explicit replacement keys, retaining an existing stored key only for its unchanged matching target. It never persists an environment-only credential.
 
-An adapter that asks the user itself sends `ui: true` with `/scan` instead of announcing sessions. A review is then opened for a strong flag whenever the scan finished within its budget, and the adapter posts the answer to `/review/answer` without calling `/review`.
+Config is stored by default at `~/.config/auto-mode/config.json`, or `AUTO_MODE_CONFIG`. Saved credentials are write-only through public settings and use owner-only file permissions on POSIX. This is still plaintext local storage; account compromise and inherited environment access are outside that protection.
 
-With the `notifications` setting `off`, the daemon records no notice for a flag and adds `quiet: true` to the answer of `/scan`, which tells an adapter that shows its own notices to skip the one for a warned flag. Reviews, the notice for a withheld output and the notices about outputs that could not be scanned are not affected.
+## Adapter lifecycle and enforcement
 
-`/ui` also returns notices, one per flag, so an interface can tell the user about flags that did not lead to a review. A later scan of the same text in the same session returns the earlier decision instead of asking again.
+The omp adapter rebuilds current-branch context for each call. It preserves the direct-input event text it receives from fresh interactive/RPC input through public custom entries, synchronizes on `before_agent_start` without promoting its transformed prompt, and reads saved goal state plus `goal_updated` as subordinate context. Human objectives submitted through `--goal` or the goal editor are authorized through their actual user-attributed prompt, not through `goal_updated` alone. Earlier trusted extensions can rewrite an input event before Auto Mode receives it; capture is not a guarantee of original physical keystrokes.
 
-`/scan` returns as soon as the scan finishes or `budgetMs` has passed, whichever comes first. The default budget is a minute, so a tool result normally waits for its scan. A scan that outlives the budget keeps running and still counts.
+Each `tool_call` sends raw input before execution. Every nonempty tool-result text is checked before delivery, including short results and edit/write confirmations. A blocked result is replaced by a safe withheld notice and the agent is aborted. The adapter does not ask to bypass the current decision. Headless sessions use the same gate. The provider deadline is at most 25 seconds and the adapter's outer deadline is 26 seconds, within omp's default 30-second handler timeout.
 
-### Deciding
+The harness's own approval policy still applies; an allow from Auto Mode cannot override a harness denial. Enforcement depends on supported hooks completing: host termination, handler timeouts, unhooked operations and non-text output are not sandboxed by this extension.
 
-`risk.mjs` rates a request from its content alone. A request has a `kind` (`shell`, `read`, `write`, `network`, `none` or `other`), a `command` or a list of `paths`, and the working directory. `policy.mjs` combines the tier with the session:
+## Policy and assurance
 
-The `detection` setting selects between two behaviors. With `warn`, the default, the daemon never opens a review, and `/decide` ignores the session's score and its `unscanned` mark, so only `critical` requests are answered with `ask`. With `ask`, reviews are opened as described above and `/decide` uses the rules below. Flags and notices are recorded in both.
-
-When the `enabled` setting is off, `/scan` and `/decide` answer `{ "disabled": true }` without scanning or deciding, and adapters leave the tool output and the harness's decision alone. The classifier session is kept open. Otherwise:
-
-- `critical` is always `ask`.
-- `high` is `ask` from the `weak` score, `medium` from the `strong` score.
-- Everything else is `allow`.
-
-Before answering for a `medium` or `high` request in `ask` mode, `/decide` waits up to `decideWaitMs` for the session's running scans. This closes the gap when a model reads a file and requests an action in the same step. With the `unscanned` setting on `allow`, the default, a scan that has still not finished, was cut off at `maxChars` or failed does not cause an `ask`; the interface gets a notice instead. With `unscanned` on `ask`, a session that is marked `unscanned` or still has a scan running after the wait is treated like one with a weak flag: a `high` request is answered with `ask` and a reason that says output could not be scanned. `/clear` and `/trust` remove the mark.
-
-`risk.mjs` tries every shell rule on the command as written and on a copy without quotes, backticks, carets and backslashes, and matches wildcards against a list of credential file names, so that `.e""nv` and `.s*h/id_*` are rated like the names they stand for. A file write is also `critical` when its target is a shell startup file, a hook, an autostart location, the harness configuration, the daemon's own settings or cache, or a file inside the directory the daemon runs from, unless the project is that directory.
-
-The daemon's log records the kind, tier, score, effect and reason of each decision, not the command or the paths.
-
-[policy.md](policy.md) lists every rule. It is generated from `risk.mjs` and `config.mjs` by `scripts/generate-policy-doc.mjs`; run `npm run docs:policy` after changing a rule or a threshold.
-
-## OpenCode 2 adapter
-
-The adapter has a server part and a terminal UI part, loaded by OpenCode from the same plugin entry. Both use `adapters/shared/client.js`, which calls the daemon and starts it as a detached Node.js process that outlives the harness, at most once every 15 seconds. It starts the daemon only when a call could not be delivered, not when the daemon answered with an error status. Before a start it moves a `daemon.log` over 5 MB to `daemon.log.1`.
-
-After starting the daemon, `callOrStart` repeats the call every 250 milliseconds for up to 20 seconds and returns its answer, so the call that found the daemon stopped is not lost; on the benchmark machine a daemon answers 3 to 5 seconds after it was started. If the daemon has not answered by then, the client returns nothing and does not wait again for a minute. A caller that must not be held up passes `wait: false`, as the OpenCode server plugin does for its first `/health` call.
-
-The client has two calls that know what an unreachable daemon means. `scan` remembers the sessions whose output it could not deliver and sends `missed: true` with the next scan of such a session; the daemon then marks the session `unscanned` and records a notice. `decide` falls back to rating the request itself with `daemon/risk.mjs` when the daemon gives no answer and the config file, read with `daemon/config.mjs`, has auto mode enabled, `detection` on `ask` and `unscanned` on `ask`: a `high` or `critical` request is answered with `ask` and a reason that says the daemon is not running. In every other case it returns nothing and the harness decides. `adapters/shared/scan.js` holds the shortest output that is scanned, 20 characters, and the wording that quotes a flagged passage to the user.
-
-### Server plugin
-
-`adapters/opencode2/server.js` is a Promise plugin for `@opencode/plugin` 2.x.
-
-On setup it calls `/health` and starts the daemon if nothing answers. The same happens whenever a later call fails.
-
-| Hook | What the adapter does |
-| --- | --- |
-| `tool` `execute.after` | Sends the output of a completed tool call to `/scan`. If the answer names a review, it waits on `/review` for the user's decision. On `stop` it replaces the output with a note that it was withheld and interrupts the session. Otherwise, when the level is not `none`, it puts a warning in front of the output. Output shorter than 20 characters and the output of tools that only repeat the model's own text are skipped. |
-| `session` `prompt` | Calls `/turn` when the user sends a message. |
-| `permission` `evaluate` | Maps the request to the daemon's shape, calls `/decide` and writes the answer into `effect`. For `ask` it sets `message` to the reason. A `deny` is left alone, and so is an MCP tool the user has answered with "Always allow". |
-
-`request.js` maps OpenCode's `action` and `resources` by exact action name: `shell` becomes `shell` with the resource as the command, `read`, `grep` and `glob` become `read`, `edit` becomes `write`, `webfetch` and `websearch` become `network`, and `question` becomes `none`. Every other action becomes `other`. MCP tools arrive as `<server>_<tool>` and always land there; matching on parts of a tool's name would let a tool called `read_page` or `list_and_send` pass as a read.
-
-OpenCode runs MCP tools through its `execute` tool, so one MCP call produces two `execute.after` events with the same text, one for the MCP tool and one for `execute`.
-
-The plugin also follows OpenCode's event stream. When a permission prompt that auto mode caused is answered with `always` and the action is not one of OpenCode's own, it stores the action name under the project directory in the plugin's storage and no longer overrides OpenCode's decision for it.
-
-If the daemon cannot be reached, the tool hook does nothing, and the permission hook leaves OpenCode's own decision alone unless the client's `decide` answers for the daemon as described above.
-
-### Terminal UI plugin
-
-`adapters/opencode2/tui.jsx` registers one command, `auto-mode.settings`, in the `global` keymap mode, with the slash name `auto-mode` and a command palette entry. A layer in the default mode is not listed in either place.
-
-The command runs `openSettings` from `settings.js`, which is plain logic over the host's dialogs and has no OpenCode imports. It reads `/config` and, inside a session, `/session`, shows every setting with its current value in a select dialog, asks for the new value with a second select dialog or a text prompt, posts it to `/config` and reports the result in a toast. It then shows the list again until the user closes it. The first entry is the auto mode switch, which posts the opposite of the current `enabled` value as soon as it is selected. Inside a session the list has an entry that calls `/clear` and one that calls `/trust`, and when the trust list is not empty, an entry that calls `/trust/reset`.
-
-While `status` is `loading` or `downloading`, `openSettings` calls the `watch` function it was given before showing the list. `tui.jsx` implements `watch` as a small dialog whose text is a Solid signal: it polls `/config` twice a second and updates the line in place, closes itself when the classifier is ready or has failed, and resolves early when the user presses esc. The list then carries a status line that opens the progress view again. Changing the model or the device goes straight to the progress view. When the status turns `ready`, a toast says so. If the daemon does not answer, the command starts it and retries for about 20 seconds.
-
-`tui.jsx` is the only file with JSX. OpenCode compiles it when it loads the plugin and supplies `solid-js` and the OpenTUI elements, so the project has no build step.
-
-OpenCode's own settings screen has no extension point for plugins, so the settings live in this separate dialog.
-
-The same plugin runs `createReviewer` from `review.js` once a second. It posts the open session and the sessions in open tabs to `/ui`, shows a toast for each notice that has neither a review nor an earlier answer covering it, and for the open reviews of one session opens a single select dialog with the two answers, naming every source. It answers the first review, which settles the others, and never asks about the same review twice. Closing the dialog counts as `stop`. After a `stop` the plugin interrupts the session through OpenCode's client, which is what ends a late review. It also shows a toast for an output that was too long to scan in full, whose scan failed, or that was read while the daemon was not running. When `/ui` has gone unanswered five times in a row after having answered before, one toast says that the daemon is not answering. It also listens for `permission.asked` events and shows the reason in a toast when the message starts with the adapter's prefix, because OpenCode's permission prompt does not display it.
-
-## Pi adapter
-
-`adapters/pi/index.js` is the extension entry Pi loads; it builds the daemon client and hands it to `createExtension` in `extension.js`, which holds the behavior and takes the client as an argument so the tests can replace it. The daemon is contacted from `session_start` on, never from the factory.
-
-| Pi event or command | What the adapter does |
-| --- | --- |
-| `session_start` | Reads `/config`, which starts the daemon if needed, and shows the state in the footer in the theme's colors: a green dot with `auto mode: warn` or `auto mode: ask`, or an amber circle with `auto mode: off` |
-| `input` | Calls `/turn`, so an earlier answer stops applying |
-| `tool_call` | Translates the call with `request.js` (`bash` and `powershell` to `shell`, `read`, `grep`, `find` and `ls` to `read`, `edit` and `write` to `write`, everything else to `other`) and calls `/decide`. On `ask` it shows a select dialog with **Allow** and **Block** and blocks the call unless the user allows it. Without a user interface it blocks |
-| `tool_result` | Sends the text of the result to `/scan` with `ui` set to whether a user interface exists. A flagged result gets the warning as a new first content part and the reminder as a new last one, and a notice that quotes the flagged passage is shown. A result that was too long to scan in full is reported with a notice of its own, and so is a daemon that stops answering, once when it goes away and once when it is back. If the answer names a review, it asks **Continue and warn the agent** or **Stop the agent**, posts the answer, and on `stop` replaces the result with the withheld note, marks it as an error and aborts the agent |
-| `/auto-mode` | Runs `openSettings` from `settings.js`: a select dialog listing every setting, a second select dialog or a text input for the new value, and a footer line that follows the classifier while it loads |
-
-Results of `edit` and `write`, results shorter than 20 characters, and results of calls that another tool made (`parentToolCallId` set) are not scanned; the result of the calling tool is, and that is the one the model reads. Calls made by another tool still go through `/decide`.
-
-Results that arrive together are asked about once: the questions run one after another, and the first answer is reused for the rest of the turn, as the daemon does for later scans. Closing the question counts as `stop`.
-
-## Codex CLI adapter
-
-Codex runs hooks as commands: it starts the command, writes one JSON event to its stdin and reads one JSON answer from its stdout. `adapters/codex/hook.mjs` is that command for every event. It builds the daemon client and hands the event to the handler of the same name in `handlers.js`, which takes the client and a state store as arguments so the tests can replace both. `install.mjs` writes the hook entries into `~/.codex/hooks.json` (or `CODEX_HOME`), next to whatever is there, and removes only its own.
-
-Codex waits for every process a hook started and stops them all when the hook's time is up, so a daemon started the usual way would hold the hook for its full timeout and then be stopped with it. The Codex adapter therefore creates its client with `breakaway: true`. On Windows the client then asks the system's management service to create the daemon process, through PowerShell's `Invoke-CimMethod` on `Win32_Process`, which makes the daemon no descendant of the hook. Such a process does not inherit the hook's environment, so the command line sets the `AUTO_MODE_` variables itself, among them `AUTO_MODE_LOG`, which tells the daemon to append its log to that file instead of writing to its error output. On other systems the daemon is started detached as for every adapter; whether Codex waits for it there has not been tried.
-
-A hook process ends with its event, so what has to outlive one is kept by `state.js` in a small JSON file per session under `~/.cache/auto-mode/codex/`: the calls that are held, the calls the user allowed for this turn, the reviews waiting for an answer, and whether the daemon was unreachable.
-
-| Codex event | What the adapter does |
-| --- | --- |
-| `SessionStart` | Reads `/config`, which starts the daemon if needed, and reports a classifier that is still loading |
-| `UserPromptSubmit` | A message that starts with `auto-mode` is a command: it is answered through `decision: "block"`, whose reason Codex shows to the user, and never reaches the model. `auto-mode allow` is the exception: it calls `/turn`, answers the waiting reviews with `continue`, moves the held calls to the allowed ones, and lets the message through with added context that tells the model to repeat the call. Any other message answers the waiting reviews with `stop`, drops held and allowed calls, and calls `/turn` |
-| `PreToolUse` | Translates the call with `request.js` and calls `/decide`. On `ask` it denies the call unless the user allowed that exact request this turn, records it as held, and tells the model to ask the user to send `auto-mode allow`. A hook cannot make Codex show a prompt, which is why the question goes through the conversation |
-| `PermissionRequest` | Runs when Codex is about to ask the user. Calls `/decide` and answers `allow` when auto mode allows the request or the user allowed it this turn. Otherwise it gives no decision, and Codex shows its own prompt |
-| `PostToolUse` | Sends the text of the tool response to `/scan` with `ui: true`. A flagged output gets the warning as `additionalContext`, since a hook cannot rewrite the output itself. If the answer names a review, or the daemon already holds the answer `stop`, the hook answers `decision: "block"` with the withheld note, which replaces the output the model sees, and `continue: false`, which ends the turn |
-
-`request.js` maps `Bash` to `shell` with its command, and `apply_patch` to `write` with the paths named in the patch's `Add File`, `Update File`, `Delete File` and `Move to` lines. `update_plan` and `request_user_input` become `none`. Everything else, MCP tools included, becomes `other`. A held call is identified by a checksum of its kind, command and paths, so allowing one call does not allow a different one.
-
-The response of `Bash` and `apply_patch` is a string, and the response of an MCP tool is its result object, of which the text parts are scanned. Results of `apply_patch`, `update_plan` and `request_user_input` and results shorter than 20 characters are not scanned. Codex does not run hooks for its hosted tools, such as web search.
-
-The event shapes were taken from the JSON schemas and the tool handlers in the Codex source (`codex-rs/hooks/schema/generated` and `codex-rs/core/src/tools`) at the time of Codex CLI 0.161.
-
-## Texts given to the model
-
-`adapters/shared/notices.js` holds the warning put in front of a flagged result, the reminder put after it, the note that replaces a withheld one, and a second wording of the warning for Codex, where it follows the output it is about. The reminder repeats in two sentences that the content did not come from the user and that the flag is to be reported even if the content asked for silence; it is there because an injection usually sits near the end of an output, and a weaker model gives the last instruction it read the most weight. The warning tells the model to treat the content as data, to tell the user in its reply that auto mode flagged it and what the injected instructions asked for, and to say that it noticed the injection itself when the content carries no such warning.
-
-## Adding an adapter
-
-An adapter needs two things from its harness: the text of each tool result, and a point where a pending action can be approved or sent to the user. It then calls `/scan` and `/decide` with a session id that is stable for the conversation and translates the harness's request into `kind`, `command` or `paths`, and `cwd`.
+[Policy](policy.md) describes the intended injection and authorization boundary. Permanent tests cover observable protocol validation, config redaction, authority preservation, blocked calls and withheld output. Integration scenarios use a local loopback provider fixture without sending data to a paid service. Simulated responses do not measure native JEV judgment, and finite live-model samples do not establish general detection accuracy. Neither yields a perfect-detection guarantee.
 
 ## Releases
 
-`.github/workflows/release.yml` runs when a push to `main` changes `daemon/`, `adapters/`, `package.json` or `package-lock.json`, and can be started by hand: unit tests, a check that `docs/policy.md` matches the code, compute the next version (major and minor from `package.json`, patch one higher than the latest matching tag) and publish a release with the packed project. Pushes to `dev` do not run it. Classifier files are not part of the package.
-
-## Tests
-
-- `test/` holds unit tests (`node:test`) for the risk rules, the decision table, the OpenCode action mapping, the Pi adapter (driven with a fake extension API: warning, asking, stopping, blocking and its settings command), settings validation and the settings dialog flow, driven with fake dialogs: changing values, the progress view, load errors and starting a stopped daemon, and for the review question and the score of answered flags. `test/risk.test.mjs` also holds the commands that used to slip past a rule (quoting, wildcards, variables, command substitution, flags that write or run), each with the tier it must get. `test/daemon.test.mjs` covers reading a damaged or invalid config file, the trust list file, the checksum check of a download with a fake server, the decision for a session with unscanned output, log rotation, and the daemon client against a stand-in server: waiting for a daemon that comes up late, reporting missed output with the next scan, deciding without a daemon, and not waiting twice. `test/codex.test.mjs` drives the Codex handlers with events shaped like Codex's and a fake client: holding and allowing a call, answering a permission request, warning, withholding and the answer in the next message, the commands, the installer's merge, and the hook script as a process against a stand-in server.
-- `e2e/run.mjs` starts a daemon on its own port, scans a clean and an injected fixture, and checks the decisions that follow, including a decision that has to wait for a running scan and clearing a session. It runs the Codex hook script as a process against that daemon, through holding and allowing a call and withholding and releasing a flagged output. It checks the quoted passage of a flagged output, a one-line injection, the `unscanned` setting with a scan that is still running, trusting and forgetting flagged content, an output cut at the scan limit whose injection sits at the end, and the classifier being unloaded when idle and loaded again by the next scan. It then changes settings over `/config`, turns auto mode off and on, runs a review to each of its two answers, switches the model in the background and waits for it, and checks that an oversized request and a request with an `Origin` header are refused. It uses a temporary config file and needs the classifier files for both models.
+The existing `dev` to `main` strategy is unchanged. `.github/workflows/release.yml` runs on source-changing pushes to `main` and supports manual dispatch only on `main`. It installs dependencies, runs `npm test`, computes the next patch version from matching tags and publishes the packed source. `dev` pushes do not publish releases. The repository package version is `0.2.0`; release packaging computes its own patch version from that minor line.
