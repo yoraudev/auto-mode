@@ -201,7 +201,7 @@ An adapter needs two things from its harness: the text of each tool result, and 
 
 ## Releases
 
-`.github/workflows/release.yml` runs on every push to `main`: unit tests, a check that `docs/policy.md` matches the code, and, when the push changes `daemon/`, `adapters/`, `package.json` or `package-lock.json`, compute the next version (major and minor from `package.json`, patch one higher than the latest matching tag) and publish a release with the packed project. Classifier files are not part of the package.
+`.github/workflows/release.yml` runs on every push to `main` and `dev`: unit tests and a check that `docs/policy.md` matches the code. Only a push to `main` that changes `daemon/`, `adapters/`, `package.json` or `package-lock.json` computes the next version (major and minor from `package.json`, patch one higher than the latest matching tag) and publishes a release with the packed project; `dev` never publishes one. Classifier files are not part of the package.
 
 ## Tests
 

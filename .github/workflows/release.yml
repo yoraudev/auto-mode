@@ -2,13 +2,13 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: write
 
 concurrency:
-  group: release
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -45,7 +45,7 @@ jobs:
 
       - name: Compute version
         id: version
-        if: steps.source.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: |
           base=$(node -p "require('./package.json').version.split('.').slice(0, 2).join('.')")
           last=$(git tag --list "v${base}.*" | sed "s/^v${base}\.//" | grep -E '^[0-9]+$' | sort -n | tail -n 1 || true)
@@ -54,7 +54,7 @@ jobs:
           echo "Releasing v${base}.${patch}"
 
       - name: Package
-        if: steps.source.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: |
           npm version "$VERSION" --no-git-tag-version --allow-same-version
           mkdir release
@@ -63,7 +63,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
 
       - name: Publish release
-        if: steps.source.outputs.changed == 'true'
+        if: github.ref == 'refs/heads/main' && steps.source.outputs.changed == 'true'
         run: gh release create "v${VERSION}" release/* --target "$GITHUB_SHA" --title "v${VERSION}" --generate-notes
         env:
           VERSION: ${{ steps.version.outputs.version }}
